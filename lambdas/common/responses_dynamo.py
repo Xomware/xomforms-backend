@@ -20,8 +20,9 @@ from datetime import datetime
 import boto3
 
 from lambdas.common.logger import get_logger
-from lambdas.common.errors import DynamoDBError
+from lambdas.common.errors import DynamoDBError, ValidationError
 from lambdas.common.constants import RESPONSES_TABLE_NAME
+from lambdas.common.timezone import generate_grid
 
 log = get_logger(__file__)
 dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
@@ -82,3 +83,40 @@ def get_responses_for_poll(poll_id: str) -> list[dict]:
     except Exception as err:
         log.error(f"Get responses for poll failed: {err}")
         raise DynamoDBError(message=str(err), function="get_responses_for_poll", table=RESPONSES_TABLE_NAME)
+
+
+def submit_availability(poll: dict, respondent_key: str, display_name: str, blocks: list[str]) -> dict:
+    """
+    Shared core for lambdas/responses_submit_authed and
+    lambdas/responses_submit_public (per docs/features/xomforms/PLAN.md) --
+    the two handlers differ only in how respondent_key is resolved (email
+    vs "guest#<uuid>") and the guestAllowed gate, both handled by the
+    caller before this runs.
+
+    Validates every submitted blockId is a real block in the poll's own
+    grid (rejects stale/forged blockIds -- e.g. from a different poll, or
+    outside the configured date range/time window) before persisting.
+    """
+    grid_block_ids = {b["blockId"] for b in generate_grid(poll)}
+    invalid = [b for b in blocks if b not in grid_block_ids]
+    if invalid:
+        raise ValidationError(
+            message=f"blocks contains ids outside this poll's grid: {invalid[:5]}",
+            function="submit_availability",
+            field="blocks",
+        )
+
+    upsert_response(
+        poll_id=poll["pollId"],
+        respondent_key=respondent_key,
+        display_name=display_name,
+        blocks=blocks,
+        close_at=poll.get("closeAt"),
+    )
+
+    return {
+        "pollId": poll["pollId"],
+        "respondentKey": respondent_key,
+        "displayName": display_name,
+        "blocks": sorted(set(blocks)),
+    }

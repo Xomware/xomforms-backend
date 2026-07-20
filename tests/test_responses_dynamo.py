@@ -128,3 +128,71 @@ class TestGetResponsesForPoll:
 
         assert len(get_responses_for_poll("poll-1")) == 1
         assert len(get_responses_for_poll("poll-2")) == 1
+
+
+def _sample_poll(poll_id="poll-1", **overrides):
+    poll = {
+        "pollId": poll_id,
+        "creatorEmail": "creator@example.com",
+        "title": "Fantasy Draft",
+        "startDate": "2026-08-03",
+        "endDate": "2026-08-03",
+        "dayStartMinute": 8 * 60,
+        "dayEndMinute": 9 * 60,
+        "granularityMinutes": 30,
+        "timezone": "America/New_York",
+        "guestAllowed": True,
+        "showResultsToRespondents": False,
+    }
+    poll.update(overrides)
+    return poll
+
+
+class TestSubmitAvailability:
+    """
+    submit_availability(poll, respondent_key, display_name, blocks) is the
+    core shared by responses_submit_authed and responses_submit_public per
+    docs/features/xomforms/PLAN.md -- the two handlers differ only in how
+    respondent_key is resolved and the guestAllowed gate (handled in the
+    handlers, not here).
+    """
+
+    def test_accepts_blocks_that_are_in_the_polls_grid(self, responses_table):
+        from lambdas.common.responses_dynamo import submit_availability, get_responses_for_poll
+
+        poll = _sample_poll()
+        result = submit_availability(poll, "dom@example.com", "Dom", ["2026-08-03T08:00", "2026-08-03T08:30"])
+
+        assert result["blocks"] == ["2026-08-03T08:00", "2026-08-03T08:30"]
+        stored = get_responses_for_poll("poll-1")
+        assert len(stored) == 1
+        assert stored[0]["respondentKey"] == "dom@example.com"
+
+    def test_rejects_block_ids_outside_the_polls_grid(self, responses_table):
+        """Guards against a stale or forged blockId (e.g. from a different
+        poll, or outside the configured time window) being persisted."""
+        from lambdas.common.responses_dynamo import submit_availability
+        from lambdas.common.errors import ValidationError
+
+        poll = _sample_poll()
+        try:
+            submit_availability(poll, "dom@example.com", "Dom", ["2026-08-03T08:00", "1999-01-01T00:00"])
+            assert False, "expected ValidationError"
+        except ValidationError:
+            pass
+
+    def test_accepts_empty_blocks_as_no_availability(self, responses_table):
+        from lambdas.common.responses_dynamo import submit_availability
+
+        poll = _sample_poll()
+        result = submit_availability(poll, "dom@example.com", "Dom", [])
+        assert result["blocks"] == []
+
+    def test_denormalizes_poll_close_at_onto_the_response(self, responses_table):
+        from lambdas.common.responses_dynamo import submit_availability, get_responses_for_poll
+
+        poll = _sample_poll(closeAt="2026-09-01T00:00:00Z")
+        submit_availability(poll, "dom@example.com", "Dom", [])
+
+        stored = get_responses_for_poll("poll-1")
+        assert "closeAt" in stored[0]
