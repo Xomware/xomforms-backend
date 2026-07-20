@@ -1,0 +1,7 @@
+# Python 3.12
+# Note: boto3 is provided by the Lambda runtime and intentionally omitted
+# here (matches xomify-backend convention) -- installed separately for
+# local dev/test via run_tests.sh.
+annotated-types==0.7.0
+pydantic==2.8.0
+pydantic_core==2.20.0
