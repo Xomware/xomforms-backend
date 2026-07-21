@@ -17,6 +17,18 @@ _TEST_ENV_VARS = {
     "POLLS_TABLE_NAME": "xomforms-polls-test",
     "RESPONSES_TABLE_NAME": "xomforms-responses-test",
     "POLLS_CREATOR_INDEX": "creatorEmail-createdAt-index",
+    # Fake AWS credentials for moto. moto intercepts the HTTP layer, but
+    # botocore still needs *some* (even fake) credentials present to sign
+    # a request before moto gets a chance to intercept it -- without these,
+    # moto-backed tests only pass by accident on a machine that happens to
+    # have real AWS credentials configured for unrelated reasons (e.g. a
+    # local ~/.aws/credentials), and fail with botocore.exceptions.
+    # NoCredentialsError anywhere else, including CI. Discovered via a CI
+    # run that failed while the exact same suite passed locally.
+    "AWS_ACCESS_KEY_ID": "testing",
+    "AWS_SECRET_ACCESS_KEY": "testing",
+    "AWS_SECURITY_TOKEN": "testing",
+    "AWS_SESSION_TOKEN": "testing",
 }
 for key, value in _TEST_ENV_VARS.items():
     os.environ.setdefault(key, value)
