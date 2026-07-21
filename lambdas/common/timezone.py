@@ -77,12 +77,18 @@ def generate_grid(poll_config: dict) -> list[dict]:
     if end < start:
         raise ValidationError(message="endDate must be on or after startDate", field="endDate")
 
-    day_start = poll_config["dayStartMinute"]
-    day_end = poll_config["dayEndMinute"]
+    # int(...) normalizes decimal.Decimal -- boto3's DynamoDB *resource* API
+    # returns numeric attributes as Decimal, not int (same reason
+    # XomformsJSONEncoder exists), and timedelta(minutes=...) below rejects
+    # Decimal outright. A poll fetched via get_poll() would otherwise crash
+    # generate_grid() -- caught via live end-to-end verification 2026-07-21
+    # (see tests/test_timezone.py::TestGenerateGridAcceptsDecimalFromDynamoDB).
+    day_start = int(poll_config["dayStartMinute"])
+    day_end = int(poll_config["dayEndMinute"])
     if day_end <= day_start:
         raise ValidationError(message="dayEndMinute must be after dayStartMinute", field="dayEndMinute")
 
-    granularity = poll_config["granularityMinutes"]
+    granularity = int(poll_config["granularityMinutes"])
     if granularity <= 0:
         raise ValidationError(message="granularityMinutes must be positive", field="granularityMinutes")
 

@@ -201,3 +201,49 @@ class TestDstBoundarySafety:
         parsed = [datetime.fromisoformat(b["utcInstant"]) for b in blocks]
         for a, b in zip(parsed, parsed[1:]):
             assert b - a == timedelta(minutes=30)
+
+
+class TestGenerateGridAcceptsDecimalFromDynamoDB:
+    """
+    Regression test for a real production bug caught during Phase 2/3 live
+    verification (2026-07-21): boto3's DynamoDB *resource* API returns
+    numeric attributes as decimal.Decimal, not int (same reason
+    XomformsJSONEncoder exists, and the same thing test_responses_dynamo.py
+    already covers for closeAt -- but generate_grid() was never exercised
+    against a REAL DynamoDB-shaped poll dict in any prior test, only
+    plain-int dicts, so this slipped through Phase 1/2 entirely and only
+    surfaced on the first real end-to-end request against live DynamoDB).
+
+    timedelta(minutes=...) rejects Decimal outright:
+        TypeError: unsupported type for timedelta minutes component: decimal.Decimal
+
+    This breaks generate_grid() for ANY caller passing a poll fetched via
+    get_poll() -- i.e. submit_availability() (validates blocks against the
+    grid) AND compute_overlap() (results_get / results_get_public), not
+    just a single handler.
+    """
+
+    def test_accepts_decimal_typed_minutes_and_granularity(self):
+        from decimal import Decimal
+        from lambdas.common.timezone import generate_grid
+
+        config = _config(
+            startDate="2026-08-03",
+            endDate="2026-08-03",
+            dayStartMinute=Decimal("480"),
+            dayEndMinute=Decimal("540"),
+            granularityMinutes=Decimal("30"),
+        )
+        blocks = generate_grid(config)
+        assert len(blocks) == 2
+        assert blocks[0]["blockId"] == "2026-08-03T08:00"
+
+    def test_decimal_and_int_configs_produce_identical_grids(self):
+        from decimal import Decimal
+        from lambdas.common.timezone import generate_grid
+
+        int_config = _config(dayStartMinute=480, dayEndMinute=540, granularityMinutes=30)
+        decimal_config = _config(
+            dayStartMinute=Decimal("480"), dayEndMinute=Decimal("540"), granularityMinutes=Decimal("30")
+        )
+        assert generate_grid(int_config) == generate_grid(decimal_config)
