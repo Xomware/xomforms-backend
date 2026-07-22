@@ -84,3 +84,38 @@ class TestPollsCreateHandler:
 
         assert body["guestAllowed"] is True
         assert body["showResultsToRespondents"] is True
+
+    @patch("lambdas.polls_create.handler.put_poll")
+    def test_event_duration_persisted_when_provided(self, mock_put_poll, mock_context, authorized_event):
+        from lambdas.polls_create.handler import handler
+
+        event = authorized_event(
+            httpMethod="POST",
+            path="/polls/create",
+            body=json.dumps(_valid_body(granularityMinutes=30, eventDurationMinutes=120)),
+        )
+        response = handler(event, mock_context)
+        body = json.loads(response["body"])
+
+        assert body["eventDurationMinutes"] == 120
+        saved = mock_put_poll.call_args[0][0]
+        assert saved["eventDurationMinutes"] == 120
+
+    @patch("lambdas.polls_create.handler.put_poll")
+    def test_event_duration_defaults_to_granularity_when_omitted(self, mock_put_poll, mock_context, authorized_event):
+        """A poll with no explicit event length is a single-slot event, so the
+        stored eventDurationMinutes defaults to the block granularity -- keeps
+        pre-existing polls (created before this field) behaving identically."""
+        from lambdas.polls_create.handler import handler
+
+        event = authorized_event(
+            httpMethod="POST",
+            path="/polls/create",
+            body=json.dumps(_valid_body(granularityMinutes=30)),  # no eventDurationMinutes
+        )
+        response = handler(event, mock_context)
+        body = json.loads(response["body"])
+
+        assert body["eventDurationMinutes"] == 30
+        saved = mock_put_poll.call_args[0][0]
+        assert saved["eventDurationMinutes"] == 30

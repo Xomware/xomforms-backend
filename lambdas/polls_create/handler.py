@@ -46,6 +46,9 @@ def handler(event, context):
         "timezone": req.timezone,
         "guestAllowed": req.guestAllowed,
         "showResultsToRespondents": req.showResultsToRespondents,
+        # A single-slot event when unspecified: default to one block so polls
+        # created before this field keep behaving identically on results.
+        "eventDurationMinutes": req.eventDurationMinutes or req.granularityMinutes,
         "createdAt": get_iso_timestamp(),
     }
     if req.closeAt is not None:
