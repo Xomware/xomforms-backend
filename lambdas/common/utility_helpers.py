@@ -185,25 +185,29 @@ def require_fields(data: dict, *fields: str) -> None:
 # ============================================
 # Caller Identity Resolution
 # ============================================
-# Xomforms' custom authorizer (ported from xomify) populates
-# event.requestContext.authorizer.email for every authed route. Unlike
-# xomify, there is no legacy query/body fallback here -- this is a fresh
-# repo, so we trust the authorizer context only.
+# The native API Gateway COGNITO_USER_POOLS authorizer (see
+# xomforms-infrastructure) validates the caller's Cognito JWT and places
+# its claims at event.requestContext.authorizer.claims.{sub,email,...} --
+# NOT directly on authorizer.* the way a custom Lambda authorizer would.
+# The frontend sends the Cognito ID token (jwt.interceptor.ts), so the
+# `email` claim is present. There is no legacy query/body fallback here --
+# this is a fresh repo, so we trust the authorizer claims only.
 
 def get_caller_email(event: dict) -> str:
     """
-    Resolve the caller's email from the authorizer context.
+    Resolve the caller's email from the Cognito authorizer claims.
 
     Raises MissingCallerIdentityError (HTTP 401) if absent -- callers on
-    authed routes are always expected to have passed through the custom
-    authorizer first.
+    authed routes are always expected to have passed through the
+    COGNITO_USER_POOLS authorizer first.
     """
     from lambdas.common.errors import MissingCallerIdentityError
 
     request_context = event.get("requestContext") or {}
     authorizer = request_context.get("authorizer") if isinstance(request_context, dict) else None
-    if isinstance(authorizer, dict):
-        email = authorizer.get("email")
+    claims = authorizer.get("claims") if isinstance(authorizer, dict) else None
+    if isinstance(claims, dict):
+        email = claims.get("email")
         if isinstance(email, str) and email:
             return email
 
