@@ -102,6 +102,56 @@ class TestPollsCreateHandler:
         assert saved["eventDurationMinutes"] == 120
 
     @patch("lambdas.polls_create.handler.put_poll")
+    def test_creates_qa_form_with_fields_and_no_scheduler_scalars(self, mock_put_poll, mock_context, authorized_event):
+        """A qa form persists its typed fields + formType, and does NOT write
+        the scheduler grid scalars."""
+        from lambdas.polls_create.handler import handler
+
+        qa_body = {
+            "title": "Team RSVP",
+            "formType": "qa",
+            "fields": [
+                {
+                    "fieldId": "f1",
+                    "type": "single_choice",
+                    "label": "Attending?",
+                    "required": True,
+                    "options": [
+                        {"optionId": "o1", "label": "Yes"},
+                        {"optionId": "o2", "label": "No"},
+                    ],
+                },
+                {"fieldId": "f2", "type": "scale", "label": "Excitement", "min": 1, "max": 5},
+            ],
+        }
+        event = authorized_event(httpMethod="POST", path="/polls/create", body=json.dumps(qa_body))
+        response = handler(event, mock_context)
+
+        assert response["statusCode"] == 201
+        body = json.loads(response["body"])
+        assert body["formType"] == "qa"
+        assert len(body["fields"]) == 2
+
+        saved = mock_put_poll.call_args[0][0]
+        assert saved["formType"] == "qa"
+        assert saved["fields"][0]["type"] == "single_choice"
+        assert "startDate" not in saved
+        assert "granularityMinutes" not in saved
+
+    @patch("lambdas.polls_create.handler.put_poll")
+    def test_scheduler_poll_still_carries_grid_scalars(self, mock_put_poll, mock_context, authorized_event):
+        """The default (scheduler) path is unchanged: grid scalars are written."""
+        from lambdas.polls_create.handler import handler
+
+        event = authorized_event(httpMethod="POST", path="/polls/create", body=json.dumps(_valid_body()))
+        handler(event, mock_context)
+
+        saved = mock_put_poll.call_args[0][0]
+        assert saved["formType"] == "scheduler"
+        assert saved["startDate"] == "2026-08-03"
+        assert saved["granularityMinutes"] == 30
+
+    @patch("lambdas.polls_create.handler.put_poll")
     def test_event_duration_defaults_to_granularity_when_omitted(self, mock_put_poll, mock_context, authorized_event):
         """A poll with no explicit event length is a single-slot event, so the
         stored eventDurationMinutes defaults to the block granularity -- keeps

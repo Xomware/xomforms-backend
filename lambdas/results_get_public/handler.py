@@ -10,11 +10,15 @@ from lambdas.common.logger import get_logger
 from lambdas.common.errors import handle_errors, ValidationError, NotFoundError, ForbiddenError
 from lambdas.common.utility_helpers import success_response, get_query_params
 from lambdas.common.polls_dynamo import get_poll
-from lambdas.common.overlap import compute_overlap
+from lambdas.common.overlap import compute_overlap, compute_form_results
 
 log = get_logger(__file__)
 
 HANDLER = "results_get_public"
+
+
+def _is_qa(poll: dict) -> bool:
+    return poll.get("formType") == "qa" or bool(poll.get("fields"))
 
 
 @handle_errors(HANDLER)
@@ -35,4 +39,8 @@ def handler(event, context):
             reason="showResultsToRespondents=false",
         )
 
+    # Q&A forms return per-field tallies; scheduler polls return the unchanged
+    # OverlapResult (grid + best contiguous window).
+    if _is_qa(poll):
+        return success_response(compute_form_results(poll_id))
     return success_response(compute_overlap(poll_id))
