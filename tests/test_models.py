@@ -115,6 +115,29 @@ class TestCreatePollRequest:
         assert model.guestAllowed is True
         assert model.showResultsToRespondents is True
 
+    def test_event_duration_defaults_to_none(self):
+        """Omitted eventDurationMinutes stays None at the model boundary --
+        the handler defaults it to one slot (granularity) so existing polls
+        created before this field keep working unchanged."""
+        from lambdas.common.models import CreatePollRequest
+
+        model = CreatePollRequest(**_valid_poll_payload())
+        assert model.eventDurationMinutes is None
+
+    def test_event_duration_accepts_positive_value(self):
+        from lambdas.common.models import CreatePollRequest
+
+        model = CreatePollRequest(**_valid_poll_payload(eventDurationMinutes=120))
+        assert model.eventDurationMinutes == 120
+
+    def test_event_duration_rejects_zero_or_negative(self):
+        from lambdas.common.models import CreatePollRequest
+
+        with pytest.raises(PydanticValidationError):
+            CreatePollRequest(**_valid_poll_payload(eventDurationMinutes=0))
+        with pytest.raises(PydanticValidationError):
+            CreatePollRequest(**_valid_poll_payload(eventDurationMinutes=-30))
+
 
 class TestSubmitAvailabilityRequest:
     def test_accepts_valid_payload(self):

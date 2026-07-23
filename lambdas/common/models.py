@@ -42,6 +42,12 @@ class CreatePollRequest(BaseModel):
     guestAllowed: bool = False
     showResultsToRespondents: bool = False
     closeAt: datetime | None = None
+    # How long the scheduled event actually runs, in minutes. None means a
+    # single-slot event -- the handler defaults it to granularityMinutes so
+    # polls created before this field behave identically. Used purely for the
+    # results "best contiguous start window" computation; it does NOT change
+    # the paint-all-availability response model.
+    eventDurationMinutes: int | None = Field(default=None, ge=1)
 
     @field_validator("title")
     @classmethod
@@ -130,6 +136,7 @@ class PollResponse(BaseModel):
     guestAllowed: bool
     showResultsToRespondents: bool
     closeAt: datetime | None = None
+    eventDurationMinutes: int | None = None
     createdAt: datetime
 
 
@@ -150,3 +157,13 @@ class OverlapResult(BaseModel):
     totalRespondents: int
     blocks: list[BlockTally]
     bestBlockIds: list[str]
+    # Event-length window fields (additive). eventDurationMinutes is the poll's
+    # configured event length; slotCount is how many contiguous grid blocks it
+    # spans. bestWindowStartIds are the start blockIds of the contiguous
+    # same-day window(s) where the most respondents are free for the WHOLE
+    # window, and bestWindowCount is that headcount. For a single-slot event
+    # these collapse to the per-block best.
+    eventDurationMinutes: int
+    slotCount: int
+    bestWindowStartIds: list[str]
+    bestWindowCount: int
