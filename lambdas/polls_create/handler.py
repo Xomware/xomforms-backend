@@ -33,24 +33,34 @@ def handler(event, context):
         raise ValidationError(message=str(err), function="handler")
 
     poll_id = str(uuid.uuid4())
+    # Attributes common to every form type.
     poll = {
         "pollId": poll_id,
         "creatorEmail": email,
         "title": req.title,
         "description": req.description,
-        "startDate": req.startDate.isoformat(),
-        "endDate": req.endDate.isoformat(),
-        "dayStartMinute": req.dayStartMinute,
-        "dayEndMinute": req.dayEndMinute,
-        "granularityMinutes": req.granularityMinutes,
-        "timezone": req.timezone,
+        "formType": req.formType,
         "guestAllowed": req.guestAllowed,
         "showResultsToRespondents": req.showResultsToRespondents,
-        # A single-slot event when unspecified: default to one block so polls
-        # created before this field keep behaving identically on results.
-        "eventDurationMinutes": req.eventDurationMinutes or req.granularityMinutes,
         "createdAt": get_iso_timestamp(),
     }
+
+    if req.formType == "qa":
+        # A Q&A form persists its typed field list; no scheduler grid config.
+        poll["fields"] = [f.model_dump() for f in (req.fields or [])]
+    else:
+        # Scheduler poll -- byte-for-byte the original item shape (plus the
+        # additive formType attribute above).
+        poll["startDate"] = req.startDate.isoformat()
+        poll["endDate"] = req.endDate.isoformat()
+        poll["dayStartMinute"] = req.dayStartMinute
+        poll["dayEndMinute"] = req.dayEndMinute
+        poll["granularityMinutes"] = req.granularityMinutes
+        poll["timezone"] = req.timezone
+        # A single-slot event when unspecified: default to one block so polls
+        # created before this field keep behaving identically on results.
+        poll["eventDurationMinutes"] = req.eventDurationMinutes or req.granularityMinutes
+
     if req.closeAt is not None:
         poll["closeAt"] = req.closeAt.isoformat()
 
