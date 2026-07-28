@@ -16,8 +16,12 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from lambdas.common.constants import (
     ALLOWED_GRANULARITY_MINUTES,
+    DEFAULT_GRANULARITY_MINUTES,
+    EVENT_DURATION_STEP_MINUTES,
     MAX_DATE_RANGE_DAYS,
+    MAX_EVENT_DURATION_MINUTES,
     MAX_GRID_BLOCKS,
+    MIN_EVENT_DURATION_MINUTES,
 )
 
 # ---------------------------------------------------------------------------
@@ -130,18 +134,32 @@ class CreatePollRequest(BaseModel):
     # qa form need not supply a date range/grid.
     startDate: date | None = None
     endDate: date | None = None
+    # ---- Start-range window (duration + start-range model) ----------------
+    # earliestStartMinute / latestStartMinute are the allowed range of EVENT
+    # START times (minutes since local midnight). This is the first-class shape
+    # the current frontend sends. From them + eventDurationMinutes we DERIVE and
+    # persist the paint-grid window:
+    #     dayStartMinute   = earliestStartMinute
+    #     dayEndMinute     = latestStartMinute + eventDurationMinutes
+    #     granularityMinutes = 15 (fixed; "block size" is no longer a control)
+    # dayEndMinute may exceed 1440 -- that is the OVERNIGHT case, where the grid
+    # rolls into the next calendar day (see timezone.generate_grid).
+    earliestStartMinute: int | None = Field(default=None, ge=0, le=1439)
+    latestStartMinute: int | None = Field(default=None, ge=0, le=1439)
+    # dayStart/dayEnd/granularity remain accepted for the LEGACY create shape
+    # (and are what every poll persists + what generate_grid reads). dayEndMinute
+    # is allowed past 1440 to hold a DERIVED overnight window end.
     dayStartMinute: int | None = Field(default=None, ge=0, le=1439)
-    dayEndMinute: int | None = Field(default=None, ge=1, le=1440)
+    dayEndMinute: int | None = Field(default=None, ge=1, le=2880)
     granularityMinutes: int | None = None
     timezone: str | None = None
     guestAllowed: bool = False
     showResultsToRespondents: bool = False
     closeAt: datetime | None = None
-    # How long the scheduled event actually runs, in minutes. None means a
-    # single-slot event -- the handler defaults it to granularityMinutes so
-    # polls created before this field behave identically. Used purely for the
-    # results "best contiguous start window" computation; it does NOT change
-    # the paint-all-availability response model.
+    # Event length ("duration"), first-class: 15-minute steps from 15 to 360.
+    # None means a single-slot event -- the handler defaults it to
+    # granularityMinutes so legacy polls behave identically. Drives the results
+    # "best contiguous start window" AND (windowed shape) the derived grid end.
     eventDurationMinutes: int | None = Field(default=None, ge=1)
 
     @field_validator("title")
@@ -158,6 +176,24 @@ class CreatePollRequest(BaseModel):
             return v
         if v not in ALLOWED_GRANULARITY_MINUTES:
             raise ValueError(f"granularityMinutes must be one of {ALLOWED_GRANULARITY_MINUTES}")
+        return v
+
+    @field_validator("eventDurationMinutes")
+    @classmethod
+    def duration_is_allowed(cls, v: int | None) -> int | None:
+        # First-class event length: 15-minute steps, MIN..MAX (15..360). ge=1 on
+        # the field already rejects 0/negative; this layers on the step + cap.
+        if v is None:
+            return v
+        if v % EVENT_DURATION_STEP_MINUTES != 0:
+            raise ValueError(
+                f"eventDurationMinutes must be a multiple of {EVENT_DURATION_STEP_MINUTES}"
+            )
+        if v < MIN_EVENT_DURATION_MINUTES or v > MAX_EVENT_DURATION_MINUTES:
+            raise ValueError(
+                f"eventDurationMinutes must be between {MIN_EVENT_DURATION_MINUTES} "
+                f"and {MAX_EVENT_DURATION_MINUTES}"
+            )
         return v
 
     @field_validator("timezone")
@@ -184,18 +220,18 @@ class CreatePollRequest(BaseModel):
         return self
 
     def _validate_scheduler(self) -> "CreatePollRequest":
-        # A scheduler poll must carry the full grid config -- unchanged rules.
-        required = {
-            "startDate": self.startDate,
-            "endDate": self.endDate,
-            "dayStartMinute": self.dayStartMinute,
-            "dayEndMinute": self.dayEndMinute,
-            "granularityMinutes": self.granularityMinutes,
-            "timezone": self.timezone,
-        }
-        missing = [k for k, v in required.items() if v is None]
-        if missing:
-            raise ValueError(f"scheduler poll missing required fields: {', '.join(missing)}")
+        # Two accepted create shapes:
+        #   - WINDOWED (current frontend): earliestStartMinute + latestStartMinute
+        #     + eventDurationMinutes. The grid window is DERIVED and granularity
+        #     is fixed at 15. Supports overnight (latestStart + duration > 1440).
+        #   - LEGACY (pre-redesign clients): dayStartMinute + dayEndMinute +
+        #     granularityMinutes supplied directly. Unchanged rules.
+        has_earliest = self.earliestStartMinute is not None
+        has_latest = self.latestStartMinute is not None
+        if has_earliest or has_latest:
+            self._derive_window_from_start_range(has_earliest, has_latest)
+        else:
+            self._require_legacy_grid_fields()
 
         if self.endDate < self.startDate:
             raise ValueError("endDate must be on or after startDate")
@@ -214,10 +250,53 @@ class CreatePollRequest(BaseModel):
                 f"Grid would contain {total_blocks} blocks, exceeding the cap of "
                 f"{MAX_GRID_BLOCKS} (keeps a fully-selected response item well under "
                 f"DynamoDB's 400 KB item limit). Narrow the date range, time window, "
-                f"or granularity."
+                f"or event length."
             )
 
         return self
+
+    def _derive_window_from_start_range(self, has_earliest: bool, has_latest: bool) -> None:
+        """
+        Windowed shape: validate the start range + duration and DERIVE the
+        persisted grid window (dayStart/dayEnd/granularity). dayEnd may exceed
+        1440 -- that is the overnight case, resolved by generate_grid rolling
+        blocks into the next calendar day.
+        """
+        if not (has_earliest and has_latest):
+            raise ValueError(
+                "scheduler poll requires both earliestStartMinute and latestStartMinute"
+            )
+        required = {
+            "startDate": self.startDate,
+            "endDate": self.endDate,
+            "eventDurationMinutes": self.eventDurationMinutes,
+            "timezone": self.timezone,
+        }
+        missing = [k for k, v in required.items() if v is None]
+        if missing:
+            raise ValueError(f"scheduler poll missing required fields: {', '.join(missing)}")
+
+        if self.latestStartMinute < self.earliestStartMinute:
+            raise ValueError("latestStartMinute must be on or after earliestStartMinute")
+
+        # Derive + persist the paint-grid window. Fixed 15-minute resolution.
+        self.granularityMinutes = DEFAULT_GRANULARITY_MINUTES
+        self.dayStartMinute = self.earliestStartMinute
+        self.dayEndMinute = self.latestStartMinute + self.eventDurationMinutes
+
+    def _require_legacy_grid_fields(self) -> None:
+        """Legacy shape: the full grid config must be supplied directly."""
+        required = {
+            "startDate": self.startDate,
+            "endDate": self.endDate,
+            "dayStartMinute": self.dayStartMinute,
+            "dayEndMinute": self.dayEndMinute,
+            "granularityMinutes": self.granularityMinutes,
+            "timezone": self.timezone,
+        }
+        missing = [k for k, v in required.items() if v is None]
+        if missing:
+            raise ValueError(f"scheduler poll missing required fields: {', '.join(missing)}")
 
 
 class SubmitAvailabilityRequest(BaseModel):
@@ -280,6 +359,10 @@ class PollResponse(BaseModel):
     # serializes cleanly through this model.
     startDate: date | None = None
     endDate: date | None = None
+    # Start-range window (duration + start-range model). Persisted alongside the
+    # derived grid window so the frontend can round-trip the creator's inputs.
+    earliestStartMinute: int | None = None
+    latestStartMinute: int | None = None
     dayStartMinute: int | None = None
     dayEndMinute: int | None = None
     granularityMinutes: int | None = None

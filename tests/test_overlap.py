@@ -251,3 +251,70 @@ class TestBestWindow:
         result = compute_overlap("poll-1")
         assert result["bestWindowStartIds"] == []
         assert result["bestWindowCount"] == 0
+
+
+def _blocks_between(date_start: str, start_min: int, count: int, granularity: int = 15) -> list[str]:
+    """Contiguous 15-min blockIds starting at (date_start, start_min), rolling
+    the date forward when the minute offset crosses midnight -- matching how
+    generate_grid labels an overnight window."""
+    from datetime import datetime, timedelta
+
+    base = datetime.strptime(date_start, "%Y-%m-%d")
+    ids = []
+    for i in range(count):
+        dt = base + timedelta(minutes=start_min + i * granularity)
+        ids.append(dt.strftime("%Y-%m-%dT%H:%M"))
+    return ids
+
+
+class TestOvernightBestWindow:
+    """
+    Overnight support: when latestStart + duration crosses midnight, the best
+    contiguous window may span the midnight boundary (…22:00 -> 01:00 next day)
+    and its start stays within [earliestStart, latestStart].
+    """
+
+    @patch("lambdas.common.overlap.get_responses_for_poll")
+    @patch("lambdas.common.overlap.get_poll")
+    def test_best_window_can_span_midnight(self, mock_get_poll, mock_get_responses):
+        from lambdas.common.overlap import compute_overlap
+
+        # earliest = latest = 22:00, 3 h event, 15-min grid -> single valid start
+        # 22:00 spanning 12 contiguous slots through 2026-08-04T00:45.
+        mock_get_poll.return_value = _poll_window(
+            "2026-08-03", "2026-08-03", 22 * 60, 22 * 60 + 180, 15, event_duration=180
+        )
+        window_ids = _blocks_between("2026-08-03", 22 * 60, 12)
+        assert window_ids[0] == "2026-08-03T22:00"
+        assert window_ids[-1] == "2026-08-04T00:45"  # sanity: window crosses midnight
+        mock_get_responses.return_value = [_response("a@example.com", window_ids)]
+
+        result = compute_overlap("poll-1")
+        assert result["slotCount"] == 12
+        assert result["bestWindowStartIds"] == ["2026-08-03T22:00"]
+        assert result["bestWindowCount"] == 1
+
+    @patch("lambdas.common.overlap.get_responses_for_poll")
+    @patch("lambdas.common.overlap.get_poll")
+    def test_window_start_stays_within_latest_start(self, mock_get_poll, mock_get_responses):
+        """With earliest 21:00, latest 22:00, 3 h event, valid starts are only
+        21:00..22:00. A respondent free from 22:15 onward can't anchor a window
+        starting at 22:15 (it would run past the generated grid), so the chosen
+        start never exceeds latestStart (22:00)."""
+        from lambdas.common.overlap import compute_overlap
+
+        mock_get_poll.return_value = _poll_window(
+            "2026-08-03", "2026-08-03", 21 * 60, 22 * 60 + 180, 15, event_duration=180
+        )
+        # Respondent is free for the full 22:00 window (12 slots to 00:45).
+        mock_get_responses.return_value = [
+            _response("a@example.com", _blocks_between("2026-08-03", 22 * 60, 12))
+        ]
+
+        result = compute_overlap("poll-1")
+        assert result["bestWindowCount"] == 1
+        assert result["bestWindowStartIds"] == ["2026-08-03T22:00"]
+        # Every reported start is <= latestStart (22:00); none leak into the
+        # overnight tail.
+        for start_id in result["bestWindowStartIds"]:
+            assert start_id <= "2026-08-03T22:00"

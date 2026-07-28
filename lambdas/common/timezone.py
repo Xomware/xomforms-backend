@@ -66,6 +66,14 @@ def generate_grid(poll_config: dict) -> list[dict]:
             dayStartMinute, dayEndMinute (minutes since local midnight,
             dayEndMinute exclusive), granularityMinutes, timezone (IANA name).
 
+    Overnight windows: dayEndMinute MAY exceed 1440. In the duration +
+    start-range model, dayEndMinute = latestStart + eventDuration, which crosses
+    midnight whenever latestStart + duration > 24:00. This falls out for free:
+    a minute offset >= 1440 makes `datetime(date) + timedelta(minutes=offset)`
+    roll into the NEXT calendar day, and that next-day wall-clock is localized
+    independently against the poll tz (still DST-safe), so its blockId carries
+    the next day's date (e.g. 22:00 + 3h yields blocks through 2026-08-04T00:45).
+
     Returns:
         List of {"blockId": str, "utcInstant": str} dicts, in chronological
         (UTC) order. blockId is a stable "YYYY-MM-DDTHH:MM" wall-clock label

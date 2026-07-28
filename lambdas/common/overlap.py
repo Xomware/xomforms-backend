@@ -13,26 +13,42 @@ tied at the max count are returned in bestBlockIds, in chronological
 """
 
 import math
+from datetime import datetime, timedelta
 
 from lambdas.common.logger import get_logger
 from lambdas.common.errors import NotFoundError
 from lambdas.common.polls_dynamo import get_poll
 from lambdas.common.responses_dynamo import get_responses_for_poll, read_answers
-from lambdas.common.timezone import generate_grid
+from lambdas.common.timezone import BLOCK_ID_FORMAT, generate_grid
 
 log = get_logger(__file__)
 
 _CHOICE_TYPES = {"single_choice", "multi_choice", "dropdown"}
 
 
-def _compute_best_window(blocks: list[dict], respondent_sets: list[set], slot_count: int) -> tuple[list[str], int]:
+def _compute_best_window(
+    blocks: list[dict], respondent_sets: list[set], slot_count: int, granularity: int
+) -> tuple[list[str], int]:
     """
     Find the best contiguous START window of length `slot_count` slots.
 
-    A window is `slot_count` consecutive grid blocks WITHIN A SINGLE DAY (a
-    window may never straddle the day-end gap into the next day's first slot).
-    Its score is the number of respondents free for the *entire* window --
-    i.e. whose selected blocks are a superset of every slot in the window.
+    A window is `slot_count` grid blocks that are ACTUALLY ADJACENT IN
+    WALL-CLOCK TIME -- each consecutive pair is exactly `granularity` minutes
+    apart. Its score is the number of respondents free for the *entire* window
+    (whose selected blocks are a superset of every slot in the window).
+
+    Contiguity is measured by real time-adjacency rather than same-calendar-day
+    grouping. This does two things at once:
+      - A plain multi-day poll's day-end -> next-day-start jump is a large time
+        gap, so it is NOT contiguous -- a window never straddles that gap
+        (preserves the original single-day guarantee).
+      - An OVERNIGHT window (…23:45 -> 00:00 -> 00:15…) IS contiguous, so it is
+        considered even though its slots span two calendar dates.
+
+    Because the generated grid already ends at exactly (latestStart + duration),
+    requiring a *full* contiguous window to fit inside the grid also keeps the
+    candidate START inside [earliestStart, latestStart]: a start later than
+    latestStart has no room left for a complete window.
 
     Returns (bestWindowStartIds, bestWindowCount): all start blockIds tied at
     the max score in chronological order, and that score. Empty/0 when there
@@ -41,30 +57,30 @@ def _compute_best_window(blocks: list[dict], respondent_sets: list[set], slot_co
     if slot_count < 1:
         slot_count = 1
 
-    # Group blocks by their calendar date prefix ("YYYY-MM-DD"), preserving the
-    # incoming chronological order so consecutive list indices are consecutive
-    # in wall-clock time within a day.
-    by_day: dict[str, list[dict]] = {}
-    for block in blocks:
-        day = block["blockId"].split("T")[0]
-        by_day.setdefault(day, []).append(block)
+    # Order by blockId -- the "YYYY-MM-DDTHH:MM" label sorts lexically into
+    # wall-clock chronological order, so consecutive indices are consecutive in
+    # local time (across midnight included).
+    ordered = sorted(blocks, key=lambda b: b["blockId"])
+    starts = [datetime.strptime(b["blockId"], BLOCK_ID_FORMAT) for b in ordered]
+    step = timedelta(minutes=granularity)
 
     best_count = 0
     best_start_ids: list[str] = []
-    for day in sorted(by_day.keys()):
-        day_blocks = by_day[day]
-        for i in range(len(day_blocks) - slot_count + 1):
-            window = day_blocks[i : i + slot_count]
-            window_ids = {b["blockId"] for b in window}
-            count = sum(1 for s in respondent_sets if window_ids <= s)
-            if count == 0:
-                continue
-            start_id = window[0]["blockId"]
-            if count > best_count:
-                best_count = count
-                best_start_ids = [start_id]
-            elif count == best_count:
-                best_start_ids.append(start_id)
+    for i in range(len(ordered) - slot_count + 1):
+        # Reject a window with any non-adjacent seam (a day boundary in a
+        # non-overnight poll, or a hole from a partial grid).
+        if any(starts[i + k + 1] - starts[i + k] != step for k in range(slot_count - 1)):
+            continue
+        window_ids = {ordered[i + k]["blockId"] for k in range(slot_count)}
+        count = sum(1 for s in respondent_sets if window_ids <= s)
+        if count == 0:
+            continue
+        start_id = ordered[i]["blockId"]
+        if count > best_count:
+            best_count = count
+            best_start_ids = [start_id]
+        elif count == best_count:
+            best_start_ids.append(start_id)
 
     return best_start_ids, best_count
 
@@ -121,7 +137,9 @@ def compute_overlap(poll_id: str) -> dict:
     slot_count = max(1, math.ceil(event_duration / granularity))
 
     respondent_sets = [set(r.get("blocks", [])) for r in responses]
-    best_window_start_ids, best_window_count = _compute_best_window(blocks, respondent_sets, slot_count)
+    best_window_start_ids, best_window_count = _compute_best_window(
+        blocks, respondent_sets, slot_count, granularity
+    )
 
     log.info(
         f"compute_overlap poll={poll_id} respondents={total_respondents} "

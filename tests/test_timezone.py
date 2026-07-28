@@ -87,6 +87,69 @@ class TestGenerateGrid:
         assert parsed.astimezone(dt_timezone.utc).day == 3
 
 
+class TestOvernightGrid:
+    """
+    Duration + start-range model: dayEndMinute may exceed 1440 when
+    latestStart + duration crosses midnight. generate_grid must roll those
+    blocks into the NEXT calendar date with correct, DST-safe UTC instants.
+    """
+
+    def test_grid_rolls_past_midnight_into_next_day(self):
+        from lambdas.common.timezone import generate_grid
+
+        # earliest/latest 22:00, 3 h event -> dayStart 1320, dayEnd 1500.
+        config = _config(
+            startDate="2026-08-03",
+            endDate="2026-08-03",
+            dayStartMinute=22 * 60,
+            dayEndMinute=22 * 60 + 180,
+            granularityMinutes=15,
+        )
+        blocks = generate_grid(config)
+        ids = [b["blockId"] for b in blocks]
+
+        assert "2026-08-03T22:00" in ids           # first start
+        assert "2026-08-03T23:45" in ids           # last block before midnight
+        assert "2026-08-04T00:00" in ids           # rolled into next day
+        assert "2026-08-04T00:45" in ids           # last block (dayEnd exclusive)
+        assert "2026-08-04T01:00" not in ids        # dayEnd is exclusive
+        assert len(ids) == 12                        # 180 / 15
+
+    def test_overnight_grid_is_chronological_and_15_min_apart(self):
+        from datetime import timedelta
+
+        from lambdas.common.timezone import generate_grid
+
+        config = _config(
+            startDate="2026-08-03",
+            endDate="2026-08-03",
+            dayStartMinute=22 * 60,
+            dayEndMinute=22 * 60 + 180,
+            granularityMinutes=15,
+        )
+        blocks = generate_grid(config)
+        parsed = [datetime.fromisoformat(b["utcInstant"]) for b in blocks]
+        assert parsed == sorted(parsed)
+        # No DST boundary here (August) -- every step is a clean 15 min in UTC,
+        # including across the local midnight roll.
+        for a, b in zip(parsed, parsed[1:]):
+            assert b - a == timedelta(minutes=15)
+
+    def test_overnight_block_id_round_trips(self):
+        from lambdas.common.timezone import generate_grid, block_id_to_utc
+
+        config = _config(
+            startDate="2026-08-03",
+            endDate="2026-08-03",
+            dayStartMinute=22 * 60,
+            dayEndMinute=22 * 60 + 180,
+            granularityMinutes=15,
+        )
+        blocks = generate_grid(config)
+        for block in blocks:
+            assert block_id_to_utc(config, block["blockId"]) == block["utcInstant"]
+
+
 class TestBlockIdUtcRoundTrip:
     def test_block_id_to_utc_matches_generated_grid(self):
         from lambdas.common.timezone import generate_grid, block_id_to_utc
