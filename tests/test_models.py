@@ -139,6 +139,94 @@ class TestCreatePollRequest:
             CreatePollRequest(**_valid_poll_payload(eventDurationMinutes=-30))
 
 
+def _windowed_poll_payload(**overrides):
+    """The current frontend's create shape: a start range + event length.
+    Grid window (dayStart/dayEnd/granularity) is DERIVED, not supplied."""
+    base = {
+        "title": "Fantasy Draft",
+        "startDate": "2026-08-03",
+        "endDate": "2026-08-05",
+        "earliestStartMinute": 18 * 60,   # 6 PM
+        "latestStartMinute": 21 * 60,     # 9 PM
+        "eventDurationMinutes": 120,      # 2 h
+        "timezone": "America/New_York",
+    }
+    base.update(overrides)
+    return base
+
+
+class TestWindowedSchedulerModel:
+    """Duration + start-range create shape (earliest/latest start + duration)."""
+
+    def test_accepts_and_derives_grid_window(self):
+        from lambdas.common.models import CreatePollRequest
+
+        model = CreatePollRequest(**_windowed_poll_payload())
+        # Derived: dayStart = earliestStart, dayEnd = latestStart + duration,
+        # granularity fixed at 15.
+        assert model.dayStartMinute == 18 * 60
+        assert model.dayEndMinute == 21 * 60 + 120
+        assert model.granularityMinutes == 15
+        assert model.earliestStartMinute == 18 * 60
+        assert model.latestStartMinute == 21 * 60
+
+    def test_overnight_window_allows_day_end_past_midnight(self):
+        from lambdas.common.models import CreatePollRequest
+
+        # latest 10 PM + 3 h -> ends 1 AM next day: dayEnd = 1320 + 180 = 1500.
+        model = CreatePollRequest(
+            **_windowed_poll_payload(
+                latestStartMinute=22 * 60, eventDurationMinutes=180, earliestStartMinute=20 * 60
+            )
+        )
+        assert model.dayEndMinute == 22 * 60 + 180
+        assert model.dayEndMinute > 24 * 60
+
+    def test_rejects_latest_before_earliest(self):
+        from lambdas.common.models import CreatePollRequest
+
+        with pytest.raises(PydanticValidationError):
+            CreatePollRequest(
+                **_windowed_poll_payload(earliestStartMinute=21 * 60, latestStartMinute=18 * 60)
+            )
+
+    def test_allows_equal_earliest_and_latest_single_fixed_start(self):
+        from lambdas.common.models import CreatePollRequest
+
+        model = CreatePollRequest(
+            **_windowed_poll_payload(earliestStartMinute=19 * 60, latestStartMinute=19 * 60)
+        )
+        assert model.dayStartMinute == 19 * 60
+
+    def test_rejects_only_one_bound_supplied(self):
+        from lambdas.common.models import CreatePollRequest
+
+        payload = _windowed_poll_payload()
+        payload.pop("latestStartMinute")
+        with pytest.raises(PydanticValidationError):
+            CreatePollRequest(**payload)
+
+    def test_rejects_duration_not_multiple_of_15(self):
+        from lambdas.common.models import CreatePollRequest
+
+        with pytest.raises(PydanticValidationError):
+            CreatePollRequest(**_windowed_poll_payload(eventDurationMinutes=100))
+
+    def test_rejects_duration_over_six_hours(self):
+        from lambdas.common.models import CreatePollRequest
+
+        with pytest.raises(PydanticValidationError):
+            CreatePollRequest(**_windowed_poll_payload(eventDurationMinutes=375))
+
+    def test_windowed_shape_requires_duration(self):
+        from lambdas.common.models import CreatePollRequest
+
+        payload = _windowed_poll_payload()
+        payload.pop("eventDurationMinutes")
+        with pytest.raises(PydanticValidationError):
+            CreatePollRequest(**payload)
+
+
 class TestSubmitAvailabilityRequest:
     def test_accepts_valid_payload(self):
         from lambdas.common.models import SubmitAvailabilityRequest

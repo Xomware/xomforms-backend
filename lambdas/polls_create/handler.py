@@ -51,12 +51,20 @@ def handler(event, context):
     else:
         # Scheduler poll -- byte-for-byte the original item shape (plus the
         # additive formType attribute above).
+        # dayStart/dayEnd/granularity are the persisted grid window that
+        # generate_grid reads. For the windowed shape these were DERIVED in the
+        # model validator (dayStart=earliestStart, dayEnd=latestStart+duration,
+        # granularity=15); for legacy requests they were supplied directly.
         poll["startDate"] = req.startDate.isoformat()
         poll["endDate"] = req.endDate.isoformat()
         poll["dayStartMinute"] = req.dayStartMinute
         poll["dayEndMinute"] = req.dayEndMinute
         poll["granularityMinutes"] = req.granularityMinutes
         poll["timezone"] = req.timezone
+        # Persist the creator's start-range inputs too (may be None for a legacy
+        # request), so the frontend can round-trip and re-render them.
+        poll["earliestStartMinute"] = req.earliestStartMinute
+        poll["latestStartMinute"] = req.latestStartMinute
         # A single-slot event when unspecified: default to one block so polls
         # created before this field keep behaving identically on results.
         poll["eventDurationMinutes"] = req.eventDurationMinutes or req.granularityMinutes
