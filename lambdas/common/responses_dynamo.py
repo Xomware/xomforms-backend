@@ -6,9 +6,15 @@ Database operations for the xomforms-responses table.
 Table Structure:
 - PK: pollId
 - SK: respondentKey (email for authed respondents, "guest#<uuid>" for guests)
-- TTL attribute: closeAt (epoch seconds) -- denormalized from the poll so
-  DynamoDB can auto-expire response rows once a poll closes. Omitted when
-  the poll has no closeAt configured.
+- GSI respondentKey-pollId-index: PK respondentKey, SK pollId -- powers
+  "forms I filled out" and the guest->account claim.
+
+NO TTL. Rows used to carry the poll's closeAt as a DynamoDB TTL attribute so
+they auto-expired once a form closed. Participation history is now a product
+feature (respondents see what they answered and can edit it), so responses
+must outlive their form. The attribute was removed from the table in
+xomforms-infrastructure; writing it here again would silently resurrect the
+expiry behaviour.
 
 upsert_response() is naturally idempotent: put_item on the same
 (pollId, respondentKey) key overwrites the previous item rather than
@@ -16,12 +22,12 @@ creating a duplicate -- this is what "idempotent upsert by respondentKey"
 means in Phase 1 of docs/features/xomforms/PLAN.md.
 """
 
-from datetime import datetime
 import boto3
 
 from lambdas.common.logger import get_logger
 from lambdas.common.errors import DynamoDBError, ValidationError
-from lambdas.common.constants import RESPONSES_TABLE_NAME
+from lambdas.common.constants import RESPONSES_TABLE_NAME, RESPONSES_RESPONDENT_INDEX
+from lambdas.common.utility_helpers import get_iso_timestamp
 from lambdas.common.timezone import generate_grid
 
 log = get_logger(__file__)
@@ -37,18 +43,11 @@ AVAILABILITY_SENTINEL = "__availability__"
 _CHOICE_TYPES = {"single_choice", "multi_choice", "dropdown"}
 
 
-def _to_epoch_seconds(iso_timestamp: str) -> int:
-    # Accept both "...Z" and "+00:00" suffixed ISO 8601 strings.
-    normalized = iso_timestamp.replace("Z", "+00:00")
-    return int(datetime.fromisoformat(normalized).timestamp())
-
-
 def upsert_response(
     poll_id: str,
     respondent_key: str,
     display_name: str,
     blocks: list[str],
-    close_at: str | None = None,
 ) -> bool:
     """
     Write (or overwrite) a respondent's availability for a poll.
@@ -63,9 +62,8 @@ def upsert_response(
             "respondentKey": respondent_key,
             "displayName": display_name,
             "blocks": sorted(set(blocks)),
+            "submittedAt": get_iso_timestamp(),
         }
-        if close_at:
-            item["closeAt"] = _to_epoch_seconds(close_at)
 
         table.put_item(Item=item)
         log.info(f"Response upserted: poll={poll_id} respondent={respondent_key}")
@@ -98,10 +96,10 @@ def delete_responses_for_poll(poll_id: str) -> int:
     """
     Delete every response row for a poll, returning the count removed.
 
-    Called by polls_delete BEFORE the poll item itself goes away. Responses
-    only carry a TTL when the poll had a closeAt, so without this cascade an
-    open poll's responses would orphan in the table permanently -- unreachable
-    (their poll is gone) but still billed and still counted by any future scan.
+    Called by polls_delete BEFORE the poll item itself goes away. Responses no
+    longer expire on their own (the TTL was removed so participation history
+    survives a form closing), so this cascade is the ONLY thing that reclaims
+    them -- without it a deleted poll's responses orphan permanently.
 
     Paginates the query and deletes through a batch_writer, which handles
     DynamoDB's 25-item batch limit and unprocessed-item retries for us.
@@ -167,7 +165,6 @@ def submit_availability(poll: dict, respondent_key: str, display_name: str, bloc
         respondent_key=respondent_key,
         display_name=display_name,
         blocks=blocks,
-        close_at=poll.get("closeAt"),
     )
 
     return {
@@ -219,7 +216,6 @@ def upsert_answers(
     respondent_key: str,
     display_name: str,
     answers: dict,
-    close_at: str | None = None,
 ) -> bool:
     """
     Write (or overwrite) a respondent's Q&A answers for a poll. Idempotent by
@@ -233,9 +229,8 @@ def upsert_answers(
             "respondentKey": respondent_key,
             "displayName": display_name,
             "answers": answers,
+            "submittedAt": get_iso_timestamp(),
         }
-        if close_at:
-            item["closeAt"] = _to_epoch_seconds(close_at)
 
         table.put_item(Item=item)
         log.info(f"Answers upserted: poll={poll_id} respondent={respondent_key}")
@@ -341,7 +336,6 @@ def submit_answers(poll: dict, respondent_key: str, display_name: str, answers: 
         respondent_key=respondent_key,
         display_name=display_name,
         answers=normalized,
-        close_at=poll.get("closeAt"),
     )
 
     return {
@@ -350,3 +344,117 @@ def submit_answers(poll: dict, respondent_key: str, display_name: str, answers: 
         "displayName": display_name,
         "answers": normalized,
     }
+
+
+def query_responses_by_respondent(respondent_key: str) -> list[dict]:
+    """
+    Every response this respondent has submitted, across all forms, via the
+    respondentKey GSI. Backs "forms I filled out" and the guest claim.
+    """
+    try:
+        table = dynamodb.Table(RESPONSES_TABLE_NAME)
+        items: list[dict] = []
+        kwargs = {
+            "IndexName": RESPONSES_RESPONDENT_INDEX,
+            "KeyConditionExpression": boto3.dynamodb.conditions.Key("respondentKey").eq(
+                respondent_key
+            ),
+        }
+        while True:
+            res = table.query(**kwargs)
+            items.extend(res.get("Items", []))
+            last_key = res.get("LastEvaluatedKey")
+            if not last_key:
+                break
+            kwargs["ExclusiveStartKey"] = last_key
+        return items
+    except Exception as err:
+        log.error(f"Query responses by respondent failed: {err}")
+        raise DynamoDBError(
+            message=str(err),
+            function="query_responses_by_respondent",
+            table=RESPONSES_TABLE_NAME,
+        )
+
+
+def get_response(poll_id: str, respondent_key: str) -> dict | None:
+    """One respondent's own row for one form. None when they haven't answered."""
+    try:
+        table = dynamodb.Table(RESPONSES_TABLE_NAME)
+        res = table.get_item(Key={"pollId": poll_id, "respondentKey": respondent_key})
+        return res.get("Item")
+    except Exception as err:
+        log.error(f"Get response failed: {err}")
+        raise DynamoDBError(
+            message=str(err), function="get_response", table=RESPONSES_TABLE_NAME
+        )
+
+
+def has_responded(poll_id: str, respondent_key: str) -> bool:
+    """Cheap existence check backing the after_response results gate."""
+    return get_response(poll_id, respondent_key) is not None
+
+
+def claim_guest_responses(guest_key: str, email: str, since_iso: str) -> dict:
+    """
+    Re-key a browser's guest responses onto a signed-in account.
+
+    respondentKey is the SORT KEY and DynamoDB keys are immutable, so each row
+    is a delete + write rather than an update. Three rules make this safe to
+    run more than once and safe on a shared machine:
+
+      - Only rows submitted at or after `since_iso` are eligible. A guestId
+        identifies a browser, not a person; without a window, signing up on a
+        shared laptop would silently absorb whoever used it before you.
+      - If the account ALREADY has a response to that form, the authed row
+        wins and the guest row is simply dropped. The signed-in answer is the
+        more deliberate one, and clobbering it would lose real data.
+      - The guest row is deleted only after its replacement is written, so an
+        interrupted claim leaves the response reachable under the old key and
+        the whole operation can be retried.
+
+    Returns counts rather than raising on skips -- the caller surfaces them so
+    the user is told what was linked instead of it happening invisibly.
+    """
+    claimed: list[str] = []
+    skipped_existing: list[str] = []
+    skipped_stale: list[str] = []
+
+    try:
+        table = dynamodb.Table(RESPONSES_TABLE_NAME)
+        for item in query_responses_by_respondent(guest_key):
+            poll_id = item["pollId"]
+
+            submitted_at = item.get("submittedAt")
+            # Rows written before submittedAt existed have no provable age, so
+            # they are not eligible -- fail closed rather than over-claim.
+            if not submitted_at or submitted_at < since_iso:
+                skipped_stale.append(poll_id)
+                continue
+
+            if get_response(poll_id, email) is not None:
+                skipped_existing.append(poll_id)
+                table.delete_item(Key={"pollId": poll_id, "respondentKey": guest_key})
+                continue
+
+            new_item = {**item, "respondentKey": email, "claimedFrom": guest_key}
+            table.put_item(Item=new_item)
+            table.delete_item(Key={"pollId": poll_id, "respondentKey": guest_key})
+            claimed.append(poll_id)
+
+        log.info(
+            f"Claim for {email}: {len(claimed)} claimed, "
+            f"{len(skipped_existing)} already answered, {len(skipped_stale)} out of window"
+        )
+        return {
+            "claimed": claimed,
+            "skippedExisting": skipped_existing,
+            "skippedStale": skipped_stale,
+        }
+    except DynamoDBError:
+        raise
+    except Exception as err:
+        log.error(f"Claim guest responses failed: {err}")
+        raise DynamoDBError(
+            message=str(err), function="claim_guest_responses", table=RESPONSES_TABLE_NAME
+        )

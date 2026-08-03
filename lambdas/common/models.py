@@ -16,6 +16,10 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from lambdas.common.constants import (
     ALLOWED_GRANULARITY_MINUTES,
+    ALLOWED_RESULTS_VISIBILITY,
+    DEFAULT_RESULTS_VISIBILITY,
+    RESULTS_VISIBILITY_ALWAYS,
+    RESULTS_VISIBILITY_HIDDEN,
     DEFAULT_GRANULARITY_MINUTES,
     EVENT_DURATION_STEP_MINUTES,
     MAX_DATE_RANGE_DAYS,
@@ -156,7 +160,15 @@ class CreatePollRequest(BaseModel):
     granularityMinutes: int | None = None
     timezone: str | None = None
     guestAllowed: bool = False
+    # Legacy boolean, kept for back-compat with clients that predate
+    # resultsVisibility. resolve_results_visibility() below reconciles the two.
     showResultsToRespondents: bool = False
+    # Who may see results: hidden / after_response / always. None means the
+    # client didn't specify, and the value is derived from the legacy boolean.
+    resultsVisibility: str | None = None
+    # May a respondent change their answer after submitting? Defaults to true --
+    # people mistype availability constantly, and a creator can switch it off.
+    allowResponseEdits: bool = True
     closeAt: datetime | None = None
     # Event length ("duration"), first-class: 15-minute steps from 15 to 360.
     # None means a single-slot event -- the handler defaults it to
@@ -196,6 +208,15 @@ class CreatePollRequest(BaseModel):
                 f"eventDurationMinutes must be between {MIN_EVENT_DURATION_MINUTES} "
                 f"and {MAX_EVENT_DURATION_MINUTES}"
             )
+        return v
+
+    @field_validator("resultsVisibility")
+    @classmethod
+    def results_visibility_is_allowed(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        if v not in ALLOWED_RESULTS_VISIBILITY:
+            raise ValueError(f"resultsVisibility must be one of {ALLOWED_RESULTS_VISIBILITY}")
         return v
 
     @field_validator("timezone")
@@ -397,6 +418,8 @@ class PollResponse(BaseModel):
     timezone: str | None = None
     guestAllowed: bool
     showResultsToRespondents: bool
+    resultsVisibility: str | None = None
+    allowResponseEdits: bool = True
     closeAt: datetime | None = None
     eventDurationMinutes: int | None = None
     createdAt: datetime
@@ -481,3 +504,81 @@ class FormResult(BaseModel):
     pollId: str
     totalRespondents: int
     fields: list[FieldResult]
+
+
+class UpdatePollRequest(BaseModel):
+    """
+    Creator-editable settings (POST /polls/update). Every field is optional --
+    only what's supplied is written, so a client can PATCH one toggle without
+    having to echo the whole form back and risk clobbering a concurrent change.
+
+    Deliberately NOT editable here: the date range, time window, granularity,
+    and field list. Changing those under respondents who have already answered
+    would silently invalidate their submissions -- blocks they painted might no
+    longer exist on the grid. That needs its own migration story, not a toggle.
+    """
+
+    pollId: str = Field(min_length=1)
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    description: str | None = Field(default=None, max_length=2000)
+    guestAllowed: bool | None = None
+    resultsVisibility: str | None = None
+    allowResponseEdits: bool | None = None
+
+    @field_validator("title")
+    @classmethod
+    def title_not_blank(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        if not v.strip():
+            raise ValueError("title cannot be blank")
+        return v.strip()
+
+    @field_validator("resultsVisibility")
+    @classmethod
+    def results_visibility_is_allowed(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        if v not in ALLOWED_RESULTS_VISIBILITY:
+            raise ValueError(f"resultsVisibility must be one of {ALLOWED_RESULTS_VISIBILITY}")
+        return v
+
+    def changes(self) -> dict:
+        """The supplied fields only, ready to write. pollId is a key, not a change."""
+        return {
+            k: v
+            for k, v in self.model_dump(exclude_none=True).items()
+            if k != "pollId"
+        }
+
+
+def resolve_results_visibility(poll: dict) -> str:
+    """
+    A stored poll's effective results visibility.
+
+    Read-time shim rather than a backfill: polls created before this setting
+    existed only carry the showResultsToRespondents boolean, and mapping it on
+    read means no migration job and no risk of a half-updated table.
+        showResultsToRespondents True  -> always  (respondents could already see)
+        showResultsToRespondents False -> hidden  (they could not)
+    New polls persist resultsVisibility explicitly, so this only fires for old rows.
+    """
+    stored = poll.get("resultsVisibility")
+    if stored in ALLOWED_RESULTS_VISIBILITY:
+        return stored
+    return (
+        RESULTS_VISIBILITY_ALWAYS
+        if poll.get("showResultsToRespondents")
+        else RESULTS_VISIBILITY_HIDDEN
+    )
+
+
+def resolve_allow_response_edits(poll: dict) -> bool:
+    """
+    Whether respondents may edit their answer. Absent on pre-setting polls;
+    defaults to True there because submit has ALWAYS been an idempotent upsert
+    by respondentKey -- re-submitting already replaced your answer. Defaulting
+    to False would be a silent regression dressed up as a new setting.
+    """
+    value = poll.get("allowResponseEdits")
+    return True if value is None else bool(value)

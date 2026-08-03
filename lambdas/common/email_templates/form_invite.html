@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <meta name="color-scheme" content="light only" />
+  <meta name="supported-color-schemes" content="light only" />
+  <title>You've been invited to fill out a Xomforms poll</title>
+  <!--[if mso]>
+  <style type="text/css">
+    table, td, div, p, a { font-family: Arial, Helvetica, sans-serif !important; }
+  </style>
+  <![endif]-->
+  <style type="text/css">
+    /* Client-safe progressive enhancement only. All critical styling is inline. */
+    body { margin: 0 !important; padding: 0 !important; width: 100% !important; }
+    a { text-decoration: none; }
+    @media only screen and (max-width: 600px) {
+      .xf-container { width: 100% !important; }
+      .xf-px { padding-left: 24px !important; padding-right: 24px !important; }
+      .xf-cta a { display: block !important; }
+    }
+  </style>
+</head>
+<body style="margin:0; padding:0; background-color:#f5f2fa;">
+  <!-- Preheader (hidden preview text) -->
+  <div style="display:none; max-height:0; overflow:hidden; mso-hide:all; font-size:1px; line-height:1px; color:#f5f2fa; opacity:0;">
+    {{recipientName}}, {{senderName}} invited you to fill out &ldquo;{{formTitle}}&rdquo; on Xomforms.
+  </div>
+
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f5f2fa;">
+    <tr>
+      <td align="center" style="padding:24px 12px;">
+
+        <!-- Card -->
+        <table role="presentation" class="xf-container" width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px; max-width:600px; background-color:#ffffff; border-radius:16px; overflow:hidden; box-shadow:0 2px 8px rgba(72,34,111,0.08);">
+
+          <!-- Header / wordmark -->
+          <tr>
+            <td align="center" style="background-color:#6a36a9; padding:32px 24px;">
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td style="font-family:Arial,Helvetica,sans-serif; font-size:26px; line-height:26px; font-weight:800; letter-spacing:0.5px; color:#ffffff;">
+                    Xom<span style="color:#ffe455;">forms</span>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Accent rule -->
+          <tr><td style="height:4px; background-color:#ffe455; line-height:4px; font-size:4px;">&nbsp;</td></tr>
+
+          <!-- Body -->
+          <tr>
+            <td class="xf-px" style="padding:40px 48px 8px 48px; font-family:Arial,Helvetica,sans-serif;">
+              <p style="margin:0 0 8px 0; font-size:14px; line-height:20px; color:#6a6280;">Hi {{recipientName}},</p>
+              <h1 style="margin:0 0 16px 0; font-size:22px; line-height:30px; font-weight:800; color:#201733;">
+                You've been invited to fill out:
+              </h1>
+              <div style="margin:0 0 24px 0; padding:16px 20px; background-color:#efe7f8; border-left:4px solid #6a36a9; border-radius:8px;">
+                <span style="font-family:Arial,Helvetica,sans-serif; font-size:18px; line-height:24px; font-weight:700; color:#48226f;">{{formTitle}}</span>
+              </div>
+              <p style="margin:0 0 28px 0; font-size:15px; line-height:23px; color:#201733;">
+                {{senderName}} is collecting responses and would love your input. It only takes a minute &mdash; tap the button below to open the form and add your availability.
+              </p>
+            </td>
+          </tr>
+
+          <!-- CTA button (bulletproof) -->
+          <tr>
+            <td class="xf-px" align="center" style="padding:0 48px 8px 48px;">
+              <table role="presentation" class="xf-cta" cellpadding="0" cellspacing="0" border="0" style="margin:0 auto;">
+                <tr>
+                  <td align="center" bgcolor="#6a36a9" style="border-radius:10px;">
+                    <!--[if mso]>
+                    <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="{{formUrl}}" style="height:52px;v-text-anchor:middle;width:280px;" arcsize="20%" strokecolor="#6a36a9" fillcolor="#6a36a9">
+                    <w:anchorlock/>
+                    <center style="color:#ffffff;font-family:Arial,sans-serif;font-size:16px;font-weight:bold;">Open the form</center>
+                    </v:roundrect>
+                    <![endif]-->
+                    <!--[if !mso]><!-- -->
+                    <a href="{{formUrl}}" target="_blank" style="display:inline-block; padding:15px 40px; font-family:Arial,Helvetica,sans-serif; font-size:16px; font-weight:700; color:#ffffff; background-color:#6a36a9; border-radius:10px;">
+                      Open the form
+                    </a>
+                    <!--<![endif]-->
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Fallback link -->
+          <tr>
+            <td class="xf-px" style="padding:20px 48px 36px 48px; font-family:Arial,Helvetica,sans-serif;">
+              <p style="margin:0 0 6px 0; font-size:12px; line-height:18px; color:#948ca8;">
+                Button not working? Copy and paste this link into your browser:
+              </p>
+              <p style="margin:0; font-size:12px; line-height:18px; word-break:break-all;">
+                <a href="{{formUrl}}" target="_blank" style="color:#6a36a9; text-decoration:underline;">{{formUrl}}</a>
+              </p>
+            </td>
+          </tr>
+
+        </table>
+        <!-- /Card -->
+
+        <!-- Footer -->
+        <table role="presentation" class="xf-container" width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px; max-width:600px;">
+          <tr>
+            <td class="xf-px" align="center" style="padding:24px 48px; font-family:Arial,Helvetica,sans-serif;">
+              <p style="margin:0 0 6px 0; font-size:12px; line-height:18px; color:#948ca8;">
+                You received this because {{senderName}} invited you to a Xomforms poll.
+              </p>
+              <p style="margin:0; font-size:12px; line-height:18px; color:#948ca8;">
+                &copy; {{year}} Xomware &middot; <a href="https://xomforms.xomware.com" target="_blank" style="color:#6a6280; text-decoration:underline;">xomforms.xomware.com</a>
+              </p>
+            </td>
+          </tr>
+        </table>
+
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
