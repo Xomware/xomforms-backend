@@ -227,6 +227,102 @@ class TestWindowedSchedulerModel:
             CreatePollRequest(**payload)
 
 
+class TestStartIntervalGranularity:
+    """
+    granularityMinutes is the creator's chosen START INTERVAL on the windowed
+    shape -- which start times responders are offered, and therefore the
+    resolution of the paint grid.
+    """
+
+    def test_defaults_to_15_when_omitted(self):
+        """Back-compat: clients predating the control keep the old 15-min grid."""
+        from lambdas.common.models import CreatePollRequest
+
+        model = CreatePollRequest(**_windowed_poll_payload())
+        assert model.granularityMinutes == 15
+
+    @pytest.mark.parametrize("step", [15, 30, 60])
+    def test_honours_each_allowed_interval(self, step):
+        from lambdas.common.models import CreatePollRequest
+
+        model = CreatePollRequest(
+            **_windowed_poll_payload(
+                granularityMinutes=step,
+                earliestStartMinute=18 * 60,
+                latestStartMinute=21 * 60,
+                eventDurationMinutes=120,
+            )
+        )
+        assert model.granularityMinutes == step
+        # The derived window still spans earliest -> latest + duration.
+        assert model.dayStartMinute == 18 * 60
+        assert model.dayEndMinute == 21 * 60 + 120
+
+    def test_rejects_an_interval_outside_the_allowed_set(self):
+        from lambdas.common.models import CreatePollRequest
+
+        with pytest.raises(PydanticValidationError):
+            CreatePollRequest(**_windowed_poll_payload(granularityMinutes=7))
+
+    # ── Alignment ─────────────────────────────────────────────────────
+    # blocks_per_day floor-divides by granularity, so a misaligned boundary
+    # would silently truncate the final slot off the grid -- responders could
+    # never paint the last event window the creator configured.
+    def test_rejects_start_time_off_the_interval(self):
+        from lambdas.common.models import CreatePollRequest
+
+        with pytest.raises(PydanticValidationError) as err:
+            CreatePollRequest(
+                **_windowed_poll_payload(
+                    granularityMinutes=60, earliestStartMinute=18 * 60 + 15
+                )
+            )
+        assert "earliestStartMinute" in str(err.value)
+
+    def test_rejects_latest_start_off_the_interval(self):
+        from lambdas.common.models import CreatePollRequest
+
+        with pytest.raises(PydanticValidationError) as err:
+            CreatePollRequest(
+                **_windowed_poll_payload(granularityMinutes=30, latestStartMinute=21 * 60 + 15)
+            )
+        assert "latestStartMinute" in str(err.value)
+
+    def test_rejects_duration_off_the_interval(self):
+        from lambdas.common.models import CreatePollRequest
+
+        with pytest.raises(PydanticValidationError) as err:
+            CreatePollRequest(
+                **_windowed_poll_payload(granularityMinutes=60, eventDurationMinutes=90)
+            )
+        assert "eventDurationMinutes" in str(err.value)
+
+    def test_aligned_hourly_config_is_accepted(self):
+        from lambdas.common.models import CreatePollRequest
+
+        model = CreatePollRequest(
+            **_windowed_poll_payload(
+                granularityMinutes=60,
+                earliestStartMinute=18 * 60,
+                latestStartMinute=21 * 60,
+                eventDurationMinutes=180,
+            )
+        )
+        window = model.dayEndMinute - model.dayStartMinute
+        assert window % model.granularityMinutes == 0
+
+    def test_coarser_interval_yields_fewer_blocks(self):
+        """A wider interval must relax the grid cap, never tighten it."""
+        from lambdas.common.models import CreatePollRequest
+
+        fine = CreatePollRequest(**_windowed_poll_payload(granularityMinutes=15))
+        coarse = CreatePollRequest(**_windowed_poll_payload(granularityMinutes=60))
+
+        fine_blocks = (fine.dayEndMinute - fine.dayStartMinute) // fine.granularityMinutes
+        coarse_blocks = (coarse.dayEndMinute - coarse.dayStartMinute) // coarse.granularityMinutes
+        assert coarse_blocks < fine_blocks
+
+
 class TestSubmitAvailabilityRequest:
     def test_accepts_valid_payload(self):
         from lambdas.common.models import SubmitAvailabilityRequest

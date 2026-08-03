@@ -141,7 +141,9 @@ class CreatePollRequest(BaseModel):
     # persist the paint-grid window:
     #     dayStartMinute   = earliestStartMinute
     #     dayEndMinute     = latestStartMinute + eventDurationMinutes
-    #     granularityMinutes = 15 (fixed; "block size" is no longer a control)
+    #     granularityMinutes = the creator's chosen START INTERVAL (15/30/60),
+    #                          defaulting to 15 when absent for back-compat with
+    #                          clients that predate the control.
     # dayEndMinute may exceed 1440 -- that is the OVERNIGHT case, where the grid
     # rolls into the next calendar day (see timezone.generate_grid).
     earliestStartMinute: int | None = Field(default=None, ge=0, le=1439)
@@ -222,8 +224,9 @@ class CreatePollRequest(BaseModel):
     def _validate_scheduler(self) -> "CreatePollRequest":
         # Two accepted create shapes:
         #   - WINDOWED (current frontend): earliestStartMinute + latestStartMinute
-        #     + eventDurationMinutes. The grid window is DERIVED and granularity
-        #     is fixed at 15. Supports overnight (latestStart + duration > 1440).
+        #     + eventDurationMinutes. The grid window is DERIVED; granularity is
+        #     the creator's start interval (default 15). Supports overnight
+        #     (latestStart + duration > 1440).
         #   - LEGACY (pre-redesign clients): dayStartMinute + dayEndMinute +
         #     granularityMinutes supplied directly. Unchanged rules.
         has_earliest = self.earliestStartMinute is not None
@@ -279,8 +282,33 @@ class CreatePollRequest(BaseModel):
         if self.latestStartMinute < self.earliestStartMinute:
             raise ValueError("latestStartMinute must be on or after earliestStartMinute")
 
-        # Derive + persist the paint-grid window. Fixed 15-minute resolution.
-        self.granularityMinutes = DEFAULT_GRANULARITY_MINUTES
+        # The creator's chosen start interval IS the grid resolution. Absent =>
+        # 15, so clients predating the control keep their exact prior behavior.
+        # Membership in ALLOWED_GRANULARITY_MINUTES is enforced by the
+        # granularity_is_allowed field validator before we get here.
+        if self.granularityMinutes is None:
+            self.granularityMinutes = DEFAULT_GRANULARITY_MINUTES
+
+        # Every boundary must land ON the grid. blocks_per_day floor-divides by
+        # granularity, so a misaligned start range or duration would silently
+        # truncate the final slot off the grid -- responders would never be able
+        # to paint the last event window the creator thinks they configured.
+        misaligned = [
+            name
+            for name, value in (
+                ("earliestStartMinute", self.earliestStartMinute),
+                ("latestStartMinute", self.latestStartMinute),
+                ("eventDurationMinutes", self.eventDurationMinutes),
+            )
+            if value % self.granularityMinutes != 0
+        ]
+        if misaligned:
+            raise ValueError(
+                f"{', '.join(misaligned)} must be a multiple of the "
+                f"granularityMinutes start interval ({self.granularityMinutes})"
+            )
+
+        # Derive + persist the paint-grid window.
         self.dayStartMinute = self.earliestStartMinute
         self.dayEndMinute = self.latestStartMinute + self.eventDurationMinutes
 

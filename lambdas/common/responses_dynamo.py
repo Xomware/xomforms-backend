@@ -94,6 +94,53 @@ def get_responses_for_poll(poll_id: str) -> list[dict]:
         raise DynamoDBError(message=str(err), function="get_responses_for_poll", table=RESPONSES_TABLE_NAME)
 
 
+def delete_responses_for_poll(poll_id: str) -> int:
+    """
+    Delete every response row for a poll, returning the count removed.
+
+    Called by polls_delete BEFORE the poll item itself goes away. Responses
+    only carry a TTL when the poll had a closeAt, so without this cascade an
+    open poll's responses would orphan in the table permanently -- unreachable
+    (their poll is gone) but still billed and still counted by any future scan.
+
+    Paginates the query and deletes through a batch_writer, which handles
+    DynamoDB's 25-item batch limit and unprocessed-item retries for us.
+    """
+    try:
+        table = dynamodb.Table(RESPONSES_TABLE_NAME)
+        deleted = 0
+        kwargs = {
+            "KeyConditionExpression": boto3.dynamodb.conditions.Key("pollId").eq(poll_id),
+            # Only the key attributes are needed to delete; skip hauling back
+            # every respondent's full answer payload.
+            "ProjectionExpression": "pollId, respondentKey",
+        }
+        while True:
+            res = table.query(**kwargs)
+            items = res.get("Items", [])
+            if items:
+                with table.batch_writer() as batch:
+                    for item in items:
+                        batch.delete_item(
+                            Key={
+                                "pollId": item["pollId"],
+                                "respondentKey": item["respondentKey"],
+                            }
+                        )
+                deleted += len(items)
+            last_key = res.get("LastEvaluatedKey")
+            if not last_key:
+                break
+            kwargs["ExclusiveStartKey"] = last_key
+        log.info(f"Deleted {deleted} response(s) for poll {poll_id}")
+        return deleted
+    except Exception as err:
+        log.error(f"Delete responses for poll failed: {err}")
+        raise DynamoDBError(
+            message=str(err), function="delete_responses_for_poll", table=RESPONSES_TABLE_NAME
+        )
+
+
 def submit_availability(poll: dict, respondent_key: str, display_name: str, blocks: list[str]) -> dict:
     """
     Shared core for lambdas/responses_submit_authed and

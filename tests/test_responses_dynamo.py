@@ -196,3 +196,55 @@ class TestSubmitAvailability:
 
         stored = get_responses_for_poll("poll-1")
         assert "closeAt" in stored[0]
+
+
+class TestDeleteResponsesForPoll:
+    def test_deletes_every_response_for_the_poll(self, responses_table):
+        from lambdas.common.responses_dynamo import (
+            upsert_response,
+            get_responses_for_poll,
+            delete_responses_for_poll,
+        )
+
+        upsert_response(poll_id="poll-1", respondent_key="a@x.com", display_name="A", blocks=[])
+        upsert_response(poll_id="poll-1", respondent_key="b@x.com", display_name="B", blocks=[])
+
+        deleted = delete_responses_for_poll("poll-1")
+
+        assert deleted == 2
+        assert get_responses_for_poll("poll-1") == []
+
+    def test_leaves_other_polls_responses_alone(self, responses_table):
+        from lambdas.common.responses_dynamo import (
+            upsert_response,
+            get_responses_for_poll,
+            delete_responses_for_poll,
+        )
+
+        upsert_response(poll_id="poll-1", respondent_key="a@x.com", display_name="A", blocks=[])
+        upsert_response(poll_id="poll-2", respondent_key="a@x.com", display_name="A", blocks=[])
+
+        delete_responses_for_poll("poll-1")
+
+        assert get_responses_for_poll("poll-1") == []
+        assert len(get_responses_for_poll("poll-2")) == 1
+
+    def test_no_responses_is_a_no_op(self, responses_table):
+        from lambdas.common.responses_dynamo import delete_responses_for_poll
+
+        assert delete_responses_for_poll("poll-with-nothing") == 0
+
+    def test_deletes_guest_rows_too(self, responses_table):
+        """Guest keys are "guest#<uuid>", not emails -- the cascade must not
+        assume an email-shaped sort key."""
+        from lambdas.common.responses_dynamo import (
+            upsert_response,
+            get_responses_for_poll,
+            delete_responses_for_poll,
+        )
+
+        upsert_response(poll_id="poll-1", respondent_key="guest#abc-123", display_name="G", blocks=[])
+        upsert_response(poll_id="poll-1", respondent_key="dom@x.com", display_name="D", blocks=[])
+
+        assert delete_responses_for_poll("poll-1") == 2
+        assert get_responses_for_poll("poll-1") == []

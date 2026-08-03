@@ -12,7 +12,7 @@ Table Structure:
 import boto3
 
 from lambdas.common.logger import get_logger
-from lambdas.common.errors import DynamoDBError
+from lambdas.common.errors import DynamoDBError, ForbiddenError, NotFoundError
 from lambdas.common.constants import POLLS_TABLE_NAME, POLLS_CREATOR_INDEX
 
 log = get_logger(__file__)
@@ -62,3 +62,72 @@ def query_polls_by_creator(creator_email: str) -> list[dict]:
     except Exception as err:
         log.error(f"Query polls by creator failed: {err}")
         raise DynamoDBError(message=str(err), function="query_polls_by_creator", table=POLLS_TABLE_NAME)
+
+
+def get_poll_for_creator(poll_id: str, creator_email: str, function: str = "unknown") -> dict:
+    """
+    Fetch a poll and assert the caller created it, for mutating creator-only
+    routes (close/delete).
+
+    This check is security-critical and deliberately lives in ONE place so the
+    two callers can't drift: polls_get is a PUBLIC route, so any pollId is
+    discoverable by anyone holding a share link. Being able to name a poll must
+    never imply being able to close or destroy it.
+    """
+    poll = get_poll(poll_id)
+    if poll is None:
+        raise NotFoundError(
+            message=f"Poll '{poll_id}' not found", function=function, resource="poll"
+        )
+    if poll.get("creatorEmail") != creator_email:
+        log.warning(f"Rejected non-creator mutation of poll {poll_id} by {creator_email}")
+        raise ForbiddenError(
+            message="Only the form's creator can modify it",
+            function=function,
+            reason="not_creator",
+        )
+    return poll
+
+
+def delete_poll(poll_id: str) -> bool:
+    """
+    Delete a poll item. Idempotent -- deleting a missing pollId is a no-op.
+    Callers MUST delete the poll's responses first (see
+    responses_dynamo.delete_responses_for_poll); nothing here cascades.
+    """
+    try:
+        table = dynamodb.Table(POLLS_TABLE_NAME)
+        table.delete_item(Key={"pollId": poll_id})
+        log.info(f"Poll deleted: {poll_id}")
+        return True
+    except Exception as err:
+        log.error(f"Delete poll failed: {err}")
+        raise DynamoDBError(message=str(err), function="delete_poll", table=POLLS_TABLE_NAME)
+
+
+def set_poll_close_at(poll_id: str, close_at: str | None) -> bool:
+    """
+    Set or clear a poll's closeAt. An ISO timestamp closes the poll; None
+    REMOVEs the attribute entirely, reopening it (derive_poll_status on the
+    frontend and the responses TTL both key off presence/absence, so removing
+    is meaningfully different from writing an empty string).
+    """
+    try:
+        table = dynamodb.Table(POLLS_TABLE_NAME)
+        if close_at is None:
+            table.update_item(
+                Key={"pollId": poll_id},
+                UpdateExpression="REMOVE closeAt",
+            )
+            log.info(f"Poll reopened: {poll_id}")
+        else:
+            table.update_item(
+                Key={"pollId": poll_id},
+                UpdateExpression="SET closeAt = :c",
+                ExpressionAttributeValues={":c": close_at},
+            )
+            log.info(f"Poll closed: {poll_id} at {close_at}")
+        return True
+    except Exception as err:
+        log.error(f"Set poll closeAt failed: {err}")
+        raise DynamoDBError(message=str(err), function="set_poll_close_at", table=POLLS_TABLE_NAME)

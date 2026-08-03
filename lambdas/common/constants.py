@@ -39,15 +39,13 @@ POLLS_CREATOR_INDEX = os.environ.get('POLLS_CREATOR_INDEX', 'creatorEmail-create
 # item-size limit even in the worst case (every block selected).
 MAX_GRID_BLOCKS = 2000
 MAX_DATE_RANGE_DAYS = 60
-# granularity ("block size") is no longer a user control -- the duration +
-# start-range scheduler fixes grid resolution at 15 minutes always (see
-# DEFAULT_GRANULARITY_MINUTES). The tuple is retained because the LEGACY create
-# shape (dayStart/dayEnd/granularity) is still accepted for back-compat, and 15
-# remains a member so derived grids validate.
+# Granularity is the creator's "start interval": which start times a responder
+# is offered, and therefore the resolution of the paint grid itself. Exposed on
+# the create form as On the hour / Every 30 / Every 15. The same tuple still
+# gates the LEGACY create shape (dayStart/dayEnd/granularity supplied directly).
 ALLOWED_GRANULARITY_MINUTES = (15, 30, 60)
-# Fixed grid resolution for the duration + start-range model. The frontend no
-# longer exposes "block size"; every windowed scheduler poll is derived at
-# 15-minute steps and this constant is what we persist as granularityMinutes.
+# Fallback when a client omits granularityMinutes on the windowed shape -- keeps
+# pre-control clients on exactly the 15-minute grid they used to get.
 DEFAULT_GRANULARITY_MINUTES = 15
 
 # Event length ("duration") is now first-class: selectable every 15 minutes
