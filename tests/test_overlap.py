@@ -318,3 +318,42 @@ class TestOvernightBestWindow:
         # overnight tail.
         for start_id in result["bestWindowStartIds"]:
             assert start_id <= "2026-08-03T22:00"
+
+
+class TestStartTimeGridSemantics:
+    """
+    On a start-time grid each block IS a whole event: painting 7 PM on a 3h
+    event means "I can do 7-10". Requiring consecutive free blocks there would
+    wrongly demand the respondent also be free to START at 7:30, 8:00, ...
+    """
+
+    def test_detects_a_start_time_grid(self):
+        from lambdas.common.overlap import _is_start_time_grid
+
+        poll = {
+            "latestStartMinute": 21 * 60,
+            "dayEndMinute": 21 * 60 + 30,
+            "granularityMinutes": 30,
+        }
+        assert _is_start_time_grid(poll) is True
+
+    def test_legacy_span_grid_is_not_mistaken_for_one(self):
+        """A poll created before the change ends at latestStart + duration."""
+        from lambdas.common.overlap import _is_start_time_grid
+
+        poll = {
+            "latestStartMinute": 21 * 60,
+            "dayEndMinute": 21 * 60 + 180,
+            "granularityMinutes": 30,
+        }
+        assert _is_start_time_grid(poll) is False
+
+    def test_a_poll_with_no_start_range_is_not_one(self):
+        from lambdas.common.overlap import _is_start_time_grid
+
+        assert _is_start_time_grid({"dayEndMinute": 840, "granularityMinutes": 30}) is False
+
+    def test_missing_granularity_does_not_crash(self):
+        from lambdas.common.overlap import _is_start_time_grid
+
+        assert _is_start_time_grid({"latestStartMinute": 1, "dayEndMinute": 2}) is False

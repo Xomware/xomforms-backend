@@ -330,8 +330,19 @@ class CreatePollRequest(BaseModel):
             )
 
         # Derive + persist the paint-grid window.
+        #
+        # The grid enumerates the candidate START TIMES only -- earliest
+        # through latest inclusive -- NOT the full span the event could run
+        # over. dayEnd is exclusive, so one granularity step past the latest
+        # start makes that last start the final row.
+        #
+        # Previously this was latestStart + duration, which meant a 6-9pm
+        # range for a 3h event drew a grid running to midnight. That offered
+        # respondents start times well past the latest one the creator allowed.
+        # Painting a start time already implies committing to the whole
+        # duration, so the extra rows were never selectable starts.
         self.dayStartMinute = self.earliestStartMinute
-        self.dayEndMinute = self.latestStartMinute + self.eventDurationMinutes
+        self.dayEndMinute = self.latestStartMinute + self.granularityMinutes
 
     def _require_legacy_grid_fields(self) -> None:
         """Legacy shape: the full grid config must be supplied directly."""
