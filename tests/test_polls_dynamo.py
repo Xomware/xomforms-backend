@@ -100,3 +100,89 @@ class TestQueryPollsByCreator:
         from lambdas.common.polls_dynamo import query_polls_by_creator
 
         assert query_polls_by_creator("nobody@example.com") == []
+
+
+class TestDeletePoll:
+    def test_delete_removes_the_item(self, polls_table):
+        from lambdas.common.polls_dynamo import put_poll, get_poll, delete_poll
+
+        put_poll(_sample_poll())
+        assert get_poll("poll-1") is not None
+
+        delete_poll("poll-1")
+        assert get_poll("poll-1") is None
+
+    def test_delete_is_idempotent(self, polls_table):
+        """Deleting an already-gone poll must not raise -- a retried request
+        after a partial failure has to be safe."""
+        from lambdas.common.polls_dynamo import delete_poll
+
+        assert delete_poll("never-existed") is True
+
+    def test_delete_leaves_other_polls_alone(self, polls_table):
+        from lambdas.common.polls_dynamo import put_poll, get_poll, delete_poll
+
+        put_poll(_sample_poll(poll_id="poll-1"))
+        put_poll(_sample_poll(poll_id="poll-2"))
+
+        delete_poll("poll-1")
+
+        assert get_poll("poll-1") is None
+        assert get_poll("poll-2") is not None
+
+
+class TestSetPollCloseAt:
+    def test_sets_close_at(self, polls_table):
+        from lambdas.common.polls_dynamo import put_poll, get_poll, set_poll_close_at
+
+        put_poll(_sample_poll())
+        set_poll_close_at("poll-1", "2026-08-04T00:00:00Z")
+
+        assert get_poll("poll-1")["closeAt"] == "2026-08-04T00:00:00Z"
+
+    def test_reopening_removes_the_attribute_entirely(self, polls_table):
+        """Status derives from PRESENCE of closeAt, so reopening must REMOVE
+        it rather than write an empty value."""
+        from lambdas.common.polls_dynamo import put_poll, get_poll, set_poll_close_at
+
+        put_poll(_sample_poll())
+        set_poll_close_at("poll-1", "2026-08-04T00:00:00Z")
+        set_poll_close_at("poll-1", None)
+
+        assert "closeAt" not in get_poll("poll-1")
+
+    def test_leaves_other_attributes_untouched(self, polls_table):
+        from lambdas.common.polls_dynamo import put_poll, get_poll, set_poll_close_at
+
+        put_poll(_sample_poll())
+        set_poll_close_at("poll-1", "2026-08-04T00:00:00Z")
+
+        poll = get_poll("poll-1")
+        assert poll["title"] == "Fantasy Draft"
+        assert poll["creatorEmail"] == "creator@example.com"
+
+
+class TestGetPollForCreator:
+    def test_returns_the_poll_for_its_creator(self, polls_table):
+        from lambdas.common.polls_dynamo import put_poll, get_poll_for_creator
+
+        put_poll(_sample_poll())
+        poll = get_poll_for_creator("poll-1", "creator@example.com")
+        assert poll["pollId"] == "poll-1"
+
+    def test_raises_forbidden_for_a_non_creator(self, polls_table):
+        """pollIds are public (polls_get is unauthenticated), so naming a poll
+        must never imply the right to mutate it."""
+        from lambdas.common.errors import ForbiddenError
+        from lambdas.common.polls_dynamo import put_poll, get_poll_for_creator
+
+        put_poll(_sample_poll())
+        with pytest.raises(ForbiddenError):
+            get_poll_for_creator("poll-1", "intruder@example.com")
+
+    def test_raises_not_found_for_a_missing_poll(self, polls_table):
+        from lambdas.common.errors import NotFoundError
+        from lambdas.common.polls_dynamo import get_poll_for_creator
+
+        with pytest.raises(NotFoundError):
+            get_poll_for_creator("nope", "creator@example.com")
