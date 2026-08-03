@@ -162,25 +162,46 @@ class TestWindowedSchedulerModel:
         from lambdas.common.models import CreatePollRequest
 
         model = CreatePollRequest(**_windowed_poll_payload())
-        # Derived: dayStart = earliestStart, dayEnd = latestStart + duration,
-        # granularity fixed at 15.
+        # The grid enumerates candidate START TIMES: earliest -> latest
+        # inclusive, so the exclusive end is one interval past the latest
+        # start. NOT latestStart + duration, which used to draw rows for
+        # starts well past the latest the creator allowed (6-9pm on a 3h
+        # event ran the grid to midnight).
         assert model.dayStartMinute == 18 * 60
-        assert model.dayEndMinute == 21 * 60 + 120
+        assert model.dayEndMinute == 21 * 60 + 15
         assert model.granularityMinutes == 15
         assert model.earliestStartMinute == 18 * 60
         assert model.latestStartMinute == 21 * 60
 
-    def test_overnight_window_allows_day_end_past_midnight(self):
+    def test_event_may_run_past_midnight_without_extending_the_grid(self):
+        """
+        A 10 PM start with a 3h event ends at 1 AM, but the GRID still stops at
+        the latest allowed start. Painting 10 PM already commits the respondent
+        to the full three hours -- there is no separate 1 AM start to offer.
+        """
         from lambdas.common.models import CreatePollRequest
 
-        # latest 10 PM + 3 h -> ends 1 AM next day: dayEnd = 1320 + 180 = 1500.
         model = CreatePollRequest(
             **_windowed_poll_payload(
                 latestStartMinute=22 * 60, eventDurationMinutes=180, earliestStartMinute=20 * 60
             )
         )
-        assert model.dayEndMinute == 22 * 60 + 180
-        assert model.dayEndMinute > 24 * 60
+        assert model.dayEndMinute == 22 * 60 + model.granularityMinutes
+        assert model.dayEndMinute <= 24 * 60
+
+    def test_grid_ends_past_midnight_only_when_the_last_start_does(self):
+        from lambdas.common.models import CreatePollRequest
+
+        model = CreatePollRequest(
+            **_windowed_poll_payload(
+                granularityMinutes=30,
+                earliestStartMinute=22 * 60,
+                latestStartMinute=23 * 60 + 30,
+                eventDurationMinutes=120,
+            )
+        )
+        # 23:30 is a valid start, so the exclusive end rolls to 24:00.
+        assert model.dayEndMinute == 24 * 60
 
     def test_rejects_latest_before_earliest(self):
         from lambdas.common.models import CreatePollRequest
@@ -254,9 +275,9 @@ class TestStartIntervalGranularity:
             )
         )
         assert model.granularityMinutes == step
-        # The derived window still spans earliest -> latest + duration.
+        # The window covers the start range only, stepped by the interval.
         assert model.dayStartMinute == 18 * 60
-        assert model.dayEndMinute == 21 * 60 + 120
+        assert model.dayEndMinute == 21 * 60 + step
 
     def test_rejects_an_interval_outside_the_allowed_set(self):
         from lambdas.common.models import CreatePollRequest

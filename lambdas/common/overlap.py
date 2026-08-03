@@ -85,6 +85,23 @@ def _compute_best_window(
     return best_start_ids, best_count
 
 
+def _is_start_time_grid(poll: dict) -> bool:
+    """
+    True when the poll's grid enumerates candidate START TIMES rather than the
+    full span the event covers.
+
+    Detected from the persisted window instead of a new flag, so polls created
+    before the change keep their original (span) semantics and their existing
+    responses stay meaningful.
+    """
+    latest = poll.get("latestStartMinute")
+    day_end = poll.get("dayEndMinute")
+    granularity = poll.get("granularityMinutes")
+    if latest is None or day_end is None or not granularity:
+        return False
+    return int(day_end) == int(latest) + int(granularity)
+
+
 def compute_overlap(poll_id: str) -> dict:
     """
     Returns:
@@ -129,12 +146,26 @@ def compute_overlap(poll_id: str) -> dict:
     else:
         best_block_ids = []
 
-    # Best contiguous START window of the poll's event length. eventDurationMinutes
-    # defaults to one slot (granularity) for polls created before the field
-    # existed, so single-slot events collapse to the per-block best.
+    # How many consecutive blocks make up one candidate event.
+    #
+    # On a START-TIME grid each block already represents the whole event --
+    # painting 7:00 PM on a 3h event means "I can do 7:00-10:00" -- so the
+    # answer is exactly one block and requiring consecutive free blocks would
+    # be wrong (it would demand they also be free to START at 7:30, 8:00...).
+    #
+    # A legacy SPAN grid drew every block the event could cover, so the event
+    # really is ceil(duration / granularity) consecutive blocks there.
+    #
+    # The two are told apart by the stored window: a start-time grid ends
+    # exactly one granularity step past the latest allowed start. This avoids
+    # a new attribute and keeps polls created before the change computing
+    # exactly as they did.
     granularity = int(poll["granularityMinutes"])
     event_duration = int(poll.get("eventDurationMinutes") or granularity)
-    slot_count = max(1, math.ceil(event_duration / granularity))
+    if _is_start_time_grid(poll):
+        slot_count = 1
+    else:
+        slot_count = max(1, math.ceil(event_duration / granularity))
 
     respondent_sets = [set(r.get("blocks", [])) for r in responses]
     best_window_start_ids, best_window_count = _compute_best_window(
