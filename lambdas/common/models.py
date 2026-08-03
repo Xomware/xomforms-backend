@@ -166,6 +166,8 @@ class CreatePollRequest(BaseModel):
     # Who may see results: hidden / after_response / always. None means the
     # client didn't specify, and the value is derived from the legacy boolean.
     resultsVisibility: str | None = None
+    # Quick-filter pills offered on the respondent grid; empty uses defaults.
+    quickFilters: list[str] | None = Field(default=None, max_length=12)
     # May a respondent change their answer after submitting? Defaults to true --
     # people mistype availability constantly, and a creator can switch it off.
     allowResponseEdits: bool = True
@@ -535,6 +537,10 @@ class UpdatePollRequest(BaseModel):
     guestAllowed: bool | None = None
     resultsVisibility: str | None = None
     allowResponseEdits: bool | None = None
+    # Which quick-filter pills the respondent grid offers. An empty list means
+    # "use the client's defaults", so a creator can clear the choice without
+    # ending up with a grid that has no shortcuts at all.
+    quickFilters: list[str] | None = Field(default=None, max_length=12)
 
     @field_validator("title")
     @classmethod

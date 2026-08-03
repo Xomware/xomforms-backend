@@ -49,6 +49,7 @@ def handler(event, context):
         # poll, seeing everyone else's answers first biases your own.
         "resultsVisibility": req.resultsVisibility or DEFAULT_RESULTS_VISIBILITY,
         "allowResponseEdits": req.allowResponseEdits,
+        "quickFilters": req.quickFilters or [],
         "createdAt": get_iso_timestamp(),
     }
 
