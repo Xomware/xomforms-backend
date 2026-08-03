@@ -131,3 +131,36 @@ def set_poll_close_at(poll_id: str, close_at: str | None) -> bool:
     except Exception as err:
         log.error(f"Set poll closeAt failed: {err}")
         raise DynamoDBError(message=str(err), function="set_poll_close_at", table=POLLS_TABLE_NAME)
+
+
+def update_poll_attributes(poll_id: str, changes: dict) -> dict:
+    """
+    Write a partial set of attributes onto a poll and return the updated item.
+
+    UpdateExpression rather than put_item so only the supplied keys move --
+    a put would need the caller to echo the whole poll back, and any attribute
+    they omitted (or hadn't heard of) would be silently erased.
+    """
+    if not changes:
+        return get_poll(poll_id) or {}
+    try:
+        table = dynamodb.Table(POLLS_TABLE_NAME)
+        # Attribute names are aliased because several are DynamoDB reserved
+        # words (e.g. "title"), which cannot appear bare in an expression.
+        names = {f"#k{i}": key for i, key in enumerate(changes)}
+        values = {f":v{i}": value for i, value in enumerate(changes.values())}
+        sets = ", ".join(f"#k{i} = :v{i}" for i in range(len(changes)))
+        res = table.update_item(
+            Key={"pollId": poll_id},
+            UpdateExpression=f"SET {sets}",
+            ExpressionAttributeNames=names,
+            ExpressionAttributeValues=values,
+            ReturnValues="ALL_NEW",
+        )
+        log.info(f"Poll updated: {poll_id} fields={list(changes)}")
+        return res.get("Attributes", {})
+    except Exception as err:
+        log.error(f"Update poll failed: {err}")
+        raise DynamoDBError(
+            message=str(err), function="update_poll_attributes", table=POLLS_TABLE_NAME
+        )

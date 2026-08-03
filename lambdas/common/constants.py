@@ -21,6 +21,9 @@ RESPONSE_HEADERS = {
 
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
 
+# Public site root -- used to build the form URLs that go out in invite emails.
+WEB_BASE_URL = os.environ.get('WEB_BASE_URL', 'https://xomforms.xomware.com').rstrip('/')
+
 # ============================================
 # DynamoDB
 # ============================================
@@ -30,6 +33,37 @@ RESPONSES_TABLE_NAME = os.environ.get('RESPONSES_TABLE_NAME', '')
 
 # GSI on xomforms-polls: PK creatorEmail, SK createdAt -- powers "my polls".
 POLLS_CREATOR_INDEX = os.environ.get('POLLS_CREATOR_INDEX', 'creatorEmail-createdAt-index')
+
+# GSI on xomforms-responses: PK respondentKey, SK pollId -- powers "forms I
+# filled out" and the guest->account claim.
+RESPONSES_RESPONDENT_INDEX = os.environ.get(
+    'RESPONSES_RESPONDENT_INDEX', 'respondentKey-pollId-index'
+)
+
+# ============================================
+# Participation settings
+# ============================================
+# Who may see a form's results.
+#   hidden         -- creator only
+#   after_response -- respondents see results once they've submitted
+#   always         -- anyone with the link
+# Default for new forms is after_response: on an availability poll, seeing
+# everyone else's answers first biases your own.
+RESULTS_VISIBILITY_HIDDEN = "hidden"
+RESULTS_VISIBILITY_AFTER_RESPONSE = "after_response"
+RESULTS_VISIBILITY_ALWAYS = "always"
+ALLOWED_RESULTS_VISIBILITY = (
+    RESULTS_VISIBILITY_HIDDEN,
+    RESULTS_VISIBILITY_AFTER_RESPONSE,
+    RESULTS_VISIBILITY_ALWAYS,
+)
+DEFAULT_RESULTS_VISIBILITY = RESULTS_VISIBILITY_AFTER_RESPONSE
+
+# How far back a guest response may be claimed onto a newly signed-in account.
+# A guestId identifies a BROWSER, not a person -- on a shared laptop an
+# unbounded window would silently attribute someone else's answers to whoever
+# signs up next.
+GUEST_CLAIM_WINDOW_HOURS = 24
 
 # ============================================
 # Grid / poll config caps

@@ -85,7 +85,13 @@ class TestUpsertResponse:
         responses = get_responses_for_poll("poll-1")
         assert len(responses) == 2
 
-    def test_close_at_is_stored_as_ttl_epoch_seconds(self, responses_table):
+    def test_no_ttl_attribute_is_written(self, responses_table):
+        """
+        Responses must NOT carry closeAt. It used to be written as a DynamoDB
+        TTL so rows expired when the form closed; participation history is now
+        a product feature (respondents see and edit what they answered), so
+        writing it again would silently resurrect the expiry.
+        """
         from lambdas.common.responses_dynamo import upsert_response, get_responses_for_poll
 
         upsert_response(
@@ -93,17 +99,23 @@ class TestUpsertResponse:
             respondent_key="dom@example.com",
             display_name="Dom",
             blocks=[],
-            close_at="2026-09-01T00:00:00Z",
         )
 
         responses = get_responses_for_poll("poll-1")
-        # boto3's DynamoDB *resource* API returns numeric attributes as
-        # Decimal, not int -- that's expected SDK behavior (same reason
-        # utility_helpers.XomformsJSONEncoder handles Decimal on the way
-        # out to JSON). We only assert it's a whole-number epoch timestamp.
-        close_at = responses[0]["closeAt"]
-        assert close_at == int(close_at)
-        assert close_at > 0
+        assert "closeAt" not in responses[0]
+
+    def test_submitted_at_is_recorded(self, responses_table):
+        """submittedAt is what bounds the guest claim window."""
+        from lambdas.common.responses_dynamo import upsert_response, get_responses_for_poll
+
+        upsert_response(
+            poll_id="poll-1",
+            respondent_key="dom@example.com",
+            display_name="Dom",
+            blocks=[],
+        )
+
+        assert get_responses_for_poll("poll-1")[0]["submittedAt"]
 
     def test_close_at_omitted_when_poll_has_no_close_at(self, responses_table):
         from lambdas.common.responses_dynamo import upsert_response, get_responses_for_poll
@@ -188,14 +200,16 @@ class TestSubmitAvailability:
         result = submit_availability(poll, "dom@example.com", "Dom", [])
         assert result["blocks"] == []
 
-    def test_denormalizes_poll_close_at_onto_the_response(self, responses_table):
+    def test_does_not_copy_poll_close_at_onto_the_response(self, responses_table):
+        """A form with a scheduled close must not put a TTL on its responses."""
         from lambdas.common.responses_dynamo import submit_availability, get_responses_for_poll
 
         poll = _sample_poll(closeAt="2026-09-01T00:00:00Z")
         submit_availability(poll, "dom@example.com", "Dom", [])
 
         stored = get_responses_for_poll("poll-1")
-        assert "closeAt" in stored[0]
+        assert "closeAt" not in stored[0]
+        assert stored[0]["submittedAt"]
 
 
 class TestDeleteResponsesForPoll:

@@ -1,0 +1,16 @@
+Xomforms — you've been invited
+
+Hi {{recipientName}},
+
+{{senderName}} invited you to fill out a Xomforms poll:
+
+  {{formTitle}}
+
+They're collecting responses and would love your input. It only takes a
+minute — open the form and add your availability here:
+
+  {{formUrl}}
+
+--------------------------------------------------------------------
+You received this because {{senderName}} invited you to a Xomforms poll.
+© {{year}} Xomware · https://xomforms.xomware.com

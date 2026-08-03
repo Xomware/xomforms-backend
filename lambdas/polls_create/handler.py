@@ -13,6 +13,7 @@ from lambdas.common.utility_helpers import (
     get_caller_email,
     get_iso_timestamp,
 )
+from lambdas.common.constants import DEFAULT_RESULTS_VISIBILITY
 from lambdas.common.models import CreatePollRequest
 from lambdas.common.polls_dynamo import put_poll
 
@@ -42,6 +43,12 @@ def handler(event, context):
         "formType": req.formType,
         "guestAllowed": req.guestAllowed,
         "showResultsToRespondents": req.showResultsToRespondents,
+        # Persist the explicit setting so resolve_results_visibility()'s
+        # legacy-boolean shim only ever fires for pre-existing polls. An
+        # unspecified value defaults to after_response: on an availability
+        # poll, seeing everyone else's answers first biases your own.
+        "resultsVisibility": req.resultsVisibility or DEFAULT_RESULTS_VISIBILITY,
+        "allowResponseEdits": req.allowResponseEdits,
         "createdAt": get_iso_timestamp(),
     }
 
