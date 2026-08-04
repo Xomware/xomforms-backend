@@ -93,6 +93,20 @@ def _detail_rows(poll: dict | None) -> list[tuple[str, str]]:
         return []
 
     rows: list[tuple[str, str]] = []
+
+    # Location first: whether it's worth attending at all often turns on
+    # where it is, before any question of when.
+    location_type = poll.get("locationType")
+    if location_type == "in_person":
+        where = poll.get("locationName") or poll.get("locationAddress")
+        if where:
+            rows.append(("Where", str(where)))
+        address = poll.get("locationAddress")
+        if address and poll.get("locationName"):
+            rows.append(("Address", str(address)))
+    elif location_type == "virtual":
+        rows.append(("Where", "Online"))
+
     duration = poll.get("eventDurationMinutes")
     earliest = poll.get("earliestStartMinute")
     latest = poll.get("latestStartMinute")

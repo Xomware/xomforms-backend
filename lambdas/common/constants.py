@@ -66,6 +66,14 @@ DEFAULT_RESULTS_VISIBILITY = RESULTS_VISIBILITY_AFTER_RESPONSE
 GUEST_CLAIM_WINDOW_HOURS = 24
 
 # ============================================
+# Location
+# ============================================
+# Where the event happens. None means the creator didn't say.
+LOCATION_IN_PERSON = "in_person"
+LOCATION_VIRTUAL = "virtual"
+ALLOWED_LOCATION_TYPES = (LOCATION_IN_PERSON, LOCATION_VIRTUAL)
+
+# ============================================
 # Grid / poll config caps
 # ============================================
 # Bounds enforced in lambdas/common/models.py so a single response item

@@ -3,6 +3,7 @@ POST /polls/create -- Creator builds a schedule poll (authed).
 """
 
 import uuid
+from decimal import Decimal
 from pydantic import ValidationError as PydanticValidationError
 
 from lambdas.common.logger import get_logger
@@ -51,6 +52,13 @@ def handler(event, context):
         "allowResponseEdits": req.allowResponseEdits,
         "quickFilters": req.quickFilters or [],
         "instructions": (req.instructions or "").strip() or None,
+        "locationType": req.locationType,
+        "locationName": (req.locationName or "").strip() or None,
+        "locationAddress": (req.locationAddress or "").strip() or None,
+        "locationUrl": (req.locationUrl or "").strip() or None,
+        # Decimal, not float: DynamoDB rejects Python floats outright.
+        "locationLat": Decimal(str(req.locationLat)) if req.locationLat is not None else None,
+        "locationLon": Decimal(str(req.locationLon)) if req.locationLon is not None else None,
         "createdAt": get_iso_timestamp(),
     }
 
