@@ -111,6 +111,7 @@ def handler(event, context):
                 sender_name=sender_name,
                 form_title=form_title,
                 poll_id=poll_id,
+                poll=poll,
             )
             record["status"] = "sent"
         except Exception as err:

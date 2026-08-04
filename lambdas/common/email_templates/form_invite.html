@@ -36,16 +36,13 @@
         <!-- Card -->
         <table role="presentation" class="xf-container" width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px; max-width:600px; background-color:#ffffff; border-radius:16px; overflow:hidden; box-shadow:0 2px 8px rgba(72,34,111,0.08);">
 
-          <!-- Header / wordmark -->
+          <!-- Header / logo. The banner is served from the live site rather
+               than embedded: Gmail and Outlook both drop data: URIs, and a CID
+               attachment would need a raw MIME send instead of SES Simple. -->
           <tr>
-            <td align="center" style="background-color:#6a36a9; padding:32px 24px;">
-              <table role="presentation" cellpadding="0" cellspacing="0" border="0">
-                <tr>
-                  <td style="font-family:Arial,Helvetica,sans-serif; font-size:26px; line-height:26px; font-weight:800; letter-spacing:0.5px; color:#ffffff;">
-                    Xom<span style="color:#ffe455;">forms</span>
-                  </td>
-                </tr>
-              </table>
+            <td align="center" style="background-color:#140f22; background-image:linear-gradient(135deg,#2a1a4d 0%,#140f22 60%); padding:28px 24px;">
+              <img src="{{logoUrl}}" width="190" height="79" alt="Xomforms"
+                   style="display:block; width:190px; max-width:70%; height:auto; border:0; outline:none; text-decoration:none;" />
             </td>
           </tr>
 
@@ -62,9 +59,10 @@
               <div style="margin:0 0 24px 0; padding:16px 20px; background-color:#efe7f8; border-left:4px solid #6a36a9; border-radius:8px;">
                 <span style="font-family:Arial,Helvetica,sans-serif; font-size:18px; line-height:24px; font-weight:700; color:#48226f;">{{formTitle}}</span>
               </div>
-              <p style="margin:0 0 28px 0; font-size:15px; line-height:23px; color:#201733;">
-                {{senderName}} is collecting responses and would love your input. It only takes a minute &mdash; tap the button below to open the form and add your availability.
+              <p style="margin:0 0 20px 0; font-size:15px; line-height:23px; color:#201733;">
+                {{senderName}} is collecting responses and would love your input. It only takes a minute &mdash; tap the button below to open the form and pick the times that work.
               </p>
+{{detailsBlock}}
             </td>
           </tr>
 
@@ -77,12 +75,12 @@
                     <!--[if mso]>
                     <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="{{formUrl}}" style="height:52px;v-text-anchor:middle;width:280px;" arcsize="20%" strokecolor="#6a36a9" fillcolor="#6a36a9">
                     <w:anchorlock/>
-                    <center style="color:#ffffff;font-family:Arial,sans-serif;font-size:16px;font-weight:bold;">Open the form</center>
+                    <center style="color:#ffffff;font-family:Arial,sans-serif;font-size:16px;font-weight:bold;">Pick your times</center>
                     </v:roundrect>
                     <![endif]-->
                     <!--[if !mso]><!-- -->
-                    <a href="{{formUrl}}" target="_blank" style="display:inline-block; padding:15px 40px; font-family:Arial,Helvetica,sans-serif; font-size:16px; font-weight:700; color:#ffffff; background-color:#6a36a9; border-radius:10px;">
-                      Open the form
+                    <a href="{{formUrl}}" target="_blank" style="display:inline-block; padding:16px 44px; font-family:Arial,Helvetica,sans-serif; font-size:16px; font-weight:700; letter-spacing:0.2px; color:#ffffff; background-color:#6a36a9; background-image:linear-gradient(135deg,#7d45c4 0%,#5a2c92 100%); border-radius:10px;">
+                      Pick your times &rarr;
                     </a>
                     <!--<![endif]-->
                   </td>
@@ -110,6 +108,8 @@
         <table role="presentation" class="xf-container" width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px; max-width:600px;">
           <tr>
             <td class="xf-px" align="center" style="padding:24px 48px; font-family:Arial,Helvetica,sans-serif;">
+              <img src="{{iconUrl}}" width="28" height="28" alt=""
+                   style="display:block; margin:0 auto 10px auto; width:28px; height:28px; border:0; border-radius:7px;" />
               <p style="margin:0 0 6px 0; font-size:12px; line-height:18px; color:#948ca8;">
                 You received this because {{senderName}} invited you to a Xomforms poll.
               </p>

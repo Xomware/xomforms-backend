@@ -65,11 +65,87 @@ def form_url(poll_id: str) -> str:
     return f"{WEB_BASE_URL}/f/{poll_id}"
 
 
+def _clock(minutes: int) -> str:
+    """Minutes since midnight -> "7:00 PM"."""
+    total = ((int(minutes) % 1440) + 1440) % 1440
+    hour, minute = divmod(total, 60)
+    suffix = "AM" if hour < 12 else "PM"
+    hour = hour % 12 or 12
+    return f"{hour}:{minute:02d} {suffix}"
+
+
+def _duration_label(minutes: int) -> str:
+    if minutes < 60:
+        return f"{minutes} minutes"
+    hours = minutes / 60
+    rounded = int(hours) if hours.is_integer() else round(hours, 1)
+    return f"{rounded} hour{'' if rounded == 1 else 's'}"
+
+
+def _detail_rows(poll: dict | None) -> list[tuple[str, str]]:
+    """
+    The facts a recipient needs before opening the form. Chiefly: they are
+    picking a START time, not the hours the event covers -- that is not
+    obvious from a grid, and getting it wrong means marking every hour you're
+    free instead of the times you could begin.
+    """
+    if not poll:
+        return []
+
+    rows: list[tuple[str, str]] = []
+    duration = poll.get("eventDurationMinutes")
+    earliest = poll.get("earliestStartMinute")
+    latest = poll.get("latestStartMinute")
+    start_date = poll.get("startDate")
+    end_date = poll.get("endDate")
+
+    if duration:
+        rows.append(("Event length", _duration_label(int(duration))))
+    if start_date:
+        rows.append(("Dates", start_date if start_date == end_date else f"{start_date} to {end_date}"))
+    if earliest is not None and latest is not None:
+        window = (
+            _clock(earliest)
+            if earliest == latest
+            else f"{_clock(earliest)} - {_clock(latest)}"
+        )
+        rows.append(("You pick a start time between", window))
+    if poll.get("timezone"):
+        rows.append(("Organizer's timezone", str(poll["timezone"])))
+    return rows
+
+
+def _details_html(rows: list[tuple[str, str]]) -> str:
+    if not rows:
+        return ""
+    cells = "".join(
+        f'<tr>'
+        f'<td style="padding:6px 14px 6px 0; font-size:13px; line-height:19px; color:#6a6280; white-space:nowrap;">{html.escape(label)}</td>'
+        f'<td style="padding:6px 0; font-size:13px; line-height:19px; font-weight:700; color:#201733;">{html.escape(value)}</td>'
+        f'</tr>'
+        for label, value in rows
+    )
+    return (
+        '              <table role="presentation" cellpadding="0" cellspacing="0" border="0" '
+        'style="width:100%; margin:0 0 26px 0; padding:14px 18px; background-color:#f4f0fb; '
+        'border:1px solid #e4dcf0; border-radius:10px; font-family:Arial,Helvetica,sans-serif;">'
+        f"{cells}</table>\n"
+    )
+
+
+def _details_text(rows: list[tuple[str, str]]) -> str:
+    if not rows:
+        return ""
+    lines = "\n".join(f"  {label}: {value}" for label, value in rows)
+    return f"\n{lines}\n"
+
+
 def render_invite(
     recipient_name: str | None,
     sender_name: str,
     form_title: str,
     poll_id: str,
+    poll: dict | None = None,
 ) -> tuple[str, str]:
     """
     Substitute the template placeholders, returning (html, text).
@@ -79,6 +155,10 @@ def render_invite(
     without escaping a title containing a tag would inject into the email --
     the template README calls this out explicitly. The text body is not escaped
     (there's no markup to break) but is still substituted from the same values.
+
+    detailsBlock is the one placeholder holding real markup, so it is
+    substituted AFTER the escaping pass and is built here from escaped values
+    rather than from anything a caller supplies verbatim.
     """
     html_template, text_template = _load_templates()
 
@@ -92,6 +172,8 @@ def render_invite(
         "formTitle": form_title,
         "formUrl": url,
         "year": year,
+        "logoUrl": f"{WEB_BASE_URL}/assets/xomforms-banner.png",
+        "iconUrl": f"{WEB_BASE_URL}/assets/xomforms-icon-256.png",
     }
 
     html_out = html_template
@@ -99,6 +181,10 @@ def render_invite(
     for token, value in raw.items():
         html_out = html_out.replace("{{" + token + "}}", html.escape(str(value), quote=True))
         text_out = text_out.replace("{{" + token + "}}", str(value))
+
+    rows = _detail_rows(poll)
+    html_out = html_out.replace("{{detailsBlock}}", _details_html(rows))
+    text_out = text_out.replace("{{detailsText}}", _details_text(rows))
 
     return html_out, text_out
 
@@ -109,9 +195,10 @@ def send_invite(
     sender_name: str,
     form_title: str,
     poll_id: str,
+    poll: dict | None = None,
 ) -> None:
     """Send one invite. Raises EmailSendError so the caller can record status."""
-    html_body, text_body = render_invite(recipient_name, sender_name, form_title, poll_id)
+    html_body, text_body = render_invite(recipient_name, sender_name, form_title, poll_id, poll)
     from_address = _ssm_value(f"/{PRODUCT}/ses/FROM_ADDRESS", f"noreply@{PRODUCT}.xomware.com")
     config_set = _ssm_value(f"/{PRODUCT}/ses/CONFIGURATION_SET", f"{PRODUCT}-invites")
 
