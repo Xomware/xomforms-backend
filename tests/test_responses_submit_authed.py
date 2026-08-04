@@ -37,9 +37,12 @@ class TestResponsesSubmitAuthedHandler:
 
         response = handler(event, mock_context)
         assert response["statusCode"] == 200
-        mock_submit.assert_called_once_with(
-            _poll(), respondent_key="dom@example.com", display_name="Dom", blocks=["2026-08-03T08:00"]
-        )
+        mock_submit.assert_called_once()
+        kwargs = mock_submit.call_args[1]
+        assert kwargs["respondent_key"] == "dom@example.com"
+        assert kwargs["blocks"] == ["2026-08-03T08:00"]
+        # Their token already carries the address -- don't make them retype it.
+        assert kwargs["email"] == "dom@example.com"
 
     @patch("lambdas.responses_submit_authed.handler.submit_availability")
     @patch("lambdas.responses_submit_authed.handler.get_poll")

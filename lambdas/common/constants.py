@@ -23,6 +23,9 @@ LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
 
 # Public site root -- used to build the form URLs that go out in invite emails.
 WEB_BASE_URL = os.environ.get('WEB_BASE_URL', 'https://xomforms.xomware.com').rstrip('/')
+# Public API root -- used to build the .ics download link that goes out in
+# notification emails, which must open with no session.
+API_BASE_URL = os.environ.get('API_BASE_URL', 'https://api.xomforms.xomware.com').rstrip('/')
 
 # ============================================
 # DynamoDB

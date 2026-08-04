@@ -48,6 +48,7 @@ def upsert_response(
     respondent_key: str,
     display_name: str,
     blocks: list[str],
+    email: str | None = None,
 ) -> bool:
     """
     Write (or overwrite) a respondent's availability for a poll.
@@ -64,6 +65,10 @@ def upsert_response(
             "blocks": sorted(set(blocks)),
             "submittedAt": get_iso_timestamp(),
         }
+        # Only write it when present -- a re-submit without one must not blank
+        # out an address the respondent gave earlier.
+        if email:
+            item["email"] = email
 
         table.put_item(Item=item)
         log.info(f"Response upserted: poll={poll_id} respondent={respondent_key}")
@@ -139,7 +144,13 @@ def delete_responses_for_poll(poll_id: str) -> int:
         )
 
 
-def submit_availability(poll: dict, respondent_key: str, display_name: str, blocks: list[str]) -> dict:
+def submit_availability(
+    poll: dict,
+    respondent_key: str,
+    display_name: str,
+    blocks: list[str],
+    email: str | None = None,
+) -> dict:
     """
     Shared core for lambdas/responses_submit_authed and
     lambdas/responses_submit_public (per docs/features/xomforms/PLAN.md) --
@@ -165,6 +176,7 @@ def submit_availability(poll: dict, respondent_key: str, display_name: str, bloc
         respondent_key=respondent_key,
         display_name=display_name,
         blocks=blocks,
+        email=email,
     )
 
     return {
@@ -216,6 +228,7 @@ def upsert_answers(
     respondent_key: str,
     display_name: str,
     answers: dict,
+    email: str | None = None,
 ) -> bool:
     """
     Write (or overwrite) a respondent's Q&A answers for a poll. Idempotent by
@@ -231,6 +244,8 @@ def upsert_answers(
             "answers": answers,
             "submittedAt": get_iso_timestamp(),
         }
+        if email:
+            item["email"] = email
 
         table.put_item(Item=item)
         log.info(f"Answers upserted: poll={poll_id} respondent={respondent_key}")
@@ -300,7 +315,13 @@ def _is_blank_answer(value) -> bool:
     return value is None or value == [] or value == ""
 
 
-def submit_answers(poll: dict, respondent_key: str, display_name: str, answers: dict) -> dict:
+def submit_answers(
+    poll: dict,
+    respondent_key: str,
+    display_name: str,
+    answers: dict,
+    email: str | None = None,
+) -> dict:
     """
     Shared core for the authed/public submit handlers when the poll is a qa
     form. Validates every answer against the poll's declared fields (unknown
@@ -336,6 +357,7 @@ def submit_answers(poll: dict, respondent_key: str, display_name: str, answers: 
         respondent_key=respondent_key,
         display_name=display_name,
         answers=normalized,
+        email=email,
     )
 
     return {
