@@ -118,18 +118,32 @@ def _detail_rows(poll: dict | None) -> list[tuple[str, str]]:
 def _details_html(rows: list[tuple[str, str]]) -> str:
     if not rows:
         return ""
+    # A hairline rule between rows, but not above the first -- a leading
+    # divider reads as a broken table edge in Outlook.
     cells = "".join(
         f'<tr>'
-        f'<td style="padding:6px 14px 6px 0; font-size:13px; line-height:19px; color:#6a6280; white-space:nowrap;">{html.escape(label)}</td>'
-        f'<td style="padding:6px 0; font-size:13px; line-height:19px; font-weight:700; color:#201733;">{html.escape(value)}</td>'
+        f'<td style="padding:{"11px" if i else "0"} 16px 11px 0; '
+        f'border-top:{"1px solid #e9e2f5" if i else "none"}; '
+        f'font-size:13px; line-height:19px; color:#6a6280; white-space:nowrap; vertical-align:top;">'
+        f'{html.escape(label)}</td>'
+        f'<td style="padding:{"11px" if i else "0"} 0 11px 0; '
+        f'border-top:{"1px solid #e9e2f5" if i else "none"}; '
+        f'font-size:13px; line-height:19px; font-weight:700; color:#201733; text-align:right;">'
+        f'{html.escape(value)}</td>'
         f'</tr>'
-        for label, value in rows
+        for i, (label, value) in enumerate(rows)
     )
     return (
         '              <table role="presentation" cellpadding="0" cellspacing="0" border="0" '
-        'style="width:100%; margin:0 0 26px 0; padding:14px 18px; background-color:#f4f0fb; '
-        'border:1px solid #e4dcf0; border-radius:10px; font-family:Arial,Helvetica,sans-serif;">'
-        f"{cells}</table>\n"
+        'style="width:100%; margin:0 0 26px 0; border-collapse:separate; '
+        'font-family:Arial,Helvetica,sans-serif;">'
+        '<tr><td style="padding:16px 20px; background-color:#faf8fd; border:1px solid #e9e2f5; '
+        'border-radius:12px;">'
+        '<span style="display:block; margin-bottom:10px; font-size:11px; letter-spacing:0.08em; '
+        'text-transform:uppercase; color:#948ca8;">The details</span>'
+        '<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;">'
+        f"{cells}</table>"
+        "</td></tr></table>\n"
     )
 
 

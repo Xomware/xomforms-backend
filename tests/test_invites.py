@@ -310,3 +310,48 @@ class TestInviteInstructions:
         assert "note from the organizer" not in html_body.lower()
         assert "{{instructionsBlock}}" not in html_body
         assert "{{instructionsText}}" not in text_body
+
+
+class TestInviteMarkupHealth:
+    """
+    Cheap structural guards. An email is fire-and-forget -- there's no error
+    surface once it lands in someone's inbox, so the obvious breakages are
+    worth pinning.
+    """
+
+    POLL = {
+        "eventDurationMinutes": 180,
+        "earliestStartMinute": 18 * 60,
+        "latestStartMinute": 21 * 60,
+        "startDate": "2026-08-09",
+        "endDate": "2026-08-16",
+        "timezone": "America/New_York",
+        "instructions": "Season commitment only.",
+    }
+
+    def _html(self):
+        from lambdas.common.email_helpers import render_invite
+
+        return render_invite("Sam", "Dom", "Draft night", "p1", self.POLL)[0]
+
+    def test_tags_are_balanced(self):
+        html_body = self._html()
+        for tag in ("table", "tr", "td", "html", "body"):
+            assert html_body.count(f"<{tag}") == html_body.count(f"</{tag}>"), tag
+
+    def test_images_carry_dimensions_and_alt(self):
+        """Outlook collapses images with no width/height; alt covers blocking."""
+        html_body = self._html()
+        for img in [seg for seg in html_body.split("<img ")[1:]]:
+            head = img[: img.index(">")]
+            assert "width=" in head and "height=" in head
+            assert "alt=" in head
+
+    def test_cta_points_at_the_form(self):
+        html_body = self._html()
+        assert html_body.count("/f/p1") >= 2  # button + fallback link
+
+    def test_no_external_css_or_script(self):
+        html_body = self._html()
+        assert "<script" not in html_body.lower()
+        assert "stylesheet" not in html_body.lower()
