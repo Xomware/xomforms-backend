@@ -61,9 +61,17 @@ def _ssm_value(name: str, fallback: str) -> str:
         return fallback
 
 
-def form_url(poll_id: str) -> str:
-    """The public respond URL for a form -- what the invite's CTA points at."""
-    return f"{WEB_BASE_URL}/f/{poll_id}"
+def form_url(poll_id: str, invite_token: str | None = None) -> str:
+    """
+    The public respond URL for a form -- what the invite's CTA points at.
+
+    An invite carries an opaque per-recipient token so the form can prefill
+    who it was sent to. The token rather than the address itself: an email in
+    the query string ends up in browser history, referrer headers, and any
+    analytics on the page, for a value the recipient never chose to publish.
+    """
+    url = f"{WEB_BASE_URL}/f/{poll_id}"
+    return f"{url}?i={invite_token}" if invite_token else url
 
 
 def _clock(minutes: int) -> str:
@@ -239,6 +247,7 @@ def render_invite(
     form_title: str,
     poll_id: str,
     poll: dict | None = None,
+    invite_token: str | None = None,
 ) -> tuple[str, str]:
     """
     Substitute the template placeholders, returning (html, text).
@@ -257,7 +266,7 @@ def render_invite(
 
     safe_recipient = recipient_name.strip() if recipient_name and recipient_name.strip() else "there"
     year = str(datetime.now(timezone.utc).year)
-    url = form_url(poll_id)
+    url = form_url(poll_id, invite_token)
 
     raw = {
         "recipientName": safe_recipient,
@@ -293,9 +302,12 @@ def send_invite(
     form_title: str,
     poll_id: str,
     poll: dict | None = None,
+    invite_token: str | None = None,
 ) -> None:
     """Send one invite. Raises EmailSendError so the caller can record status."""
-    html_body, text_body = render_invite(recipient_name, sender_name, form_title, poll_id, poll)
+    html_body, text_body = render_invite(
+        recipient_name, sender_name, form_title, poll_id, poll, invite_token
+    )
     from_address = _ssm_value(f"/{PRODUCT}/ses/FROM_ADDRESS", f"noreply@{PRODUCT}.xomware.com")
     config_set = _ssm_value(f"/{PRODUCT}/ses/CONFIGURATION_SET", f"{PRODUCT}-invites")
 

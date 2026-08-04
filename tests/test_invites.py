@@ -445,3 +445,135 @@ class TestTimezoneLabel:
         _, text_body = render_invite("Sam", "Dom", "Draft", "p1", poll)
         assert "America/New_York" not in text_body
         assert "New York (EDT)" in text_body
+
+
+class TestInviteTokens:
+    @patch("lambdas.invites_send.handler.update_poll_attributes")
+    @patch("lambdas.invites_send.handler.send_invite")
+    @patch("lambdas.common.polls_dynamo.get_poll")
+    def test_each_recipient_gets_their_own_token(
+        self, mock_get, mock_send, mock_update, mock_context, authorized_event
+    ):
+        from lambdas.invites_send.handler import handler
+
+        mock_get.return_value = OWNED
+        event = authorized_event(
+            httpMethod="POST",
+            path="/invites/send",
+            body=json.dumps({"pollId": "poll-1", "recipients": ["a@x.com", "b@x.com"]}),
+        )
+
+        handler(event, mock_context)
+        _, changes = mock_update.call_args[0]
+        tokens = [i["token"] for i in changes["invites"]]
+        assert len(set(tokens)) == 2, "tokens must be per-recipient, not shared"
+
+    @patch("lambdas.invites_send.handler.update_poll_attributes")
+    @patch("lambdas.invites_send.handler.send_invite")
+    @patch("lambdas.common.polls_dynamo.get_poll")
+    def test_re_inviting_keeps_the_existing_token(
+        self, mock_get, mock_send, mock_update, mock_context, authorized_event
+    ):
+        """The earlier email's link must keep working -- people click whichever
+        one they still have."""
+        from lambdas.invites_send.handler import handler
+
+        mock_get.return_value = {
+            **OWNED,
+            "invites": [{"email": "a@x.com", "token": "keepme", "status": "sent"}],
+        }
+        event = authorized_event(
+            httpMethod="POST",
+            path="/invites/send",
+            body=json.dumps({"pollId": "poll-1", "recipients": ["a@x.com"]}),
+        )
+
+        handler(event, mock_context)
+        _, changes = mock_update.call_args[0]
+        assert changes["invites"][0]["token"] == "keepme"
+
+    @patch("lambdas.invites_send.handler.update_poll_attributes")
+    @patch("lambdas.invites_send.handler.send_invite")
+    @patch("lambdas.common.polls_dynamo.get_poll")
+    def test_the_link_carries_the_token(
+        self, mock_get, mock_send, mock_update, mock_context, authorized_event
+    ):
+        from lambdas.invites_send.handler import handler
+
+        mock_get.return_value = OWNED
+        event = authorized_event(
+            httpMethod="POST",
+            path="/invites/send",
+            body=json.dumps({"pollId": "poll-1", "recipients": ["a@x.com"]}),
+        )
+
+        handler(event, mock_context)
+        assert mock_send.call_args[1]["invite_token"]
+
+    def test_the_url_carries_the_token_not_the_address(self):
+        """An email in a query string leaks into history, referrers, analytics."""
+        from lambdas.common.email_helpers import form_url
+
+        url = form_url("poll-1", "abc123")
+        assert url.endswith("?i=abc123")
+        assert "@" not in url
+
+    def test_a_plain_form_url_has_no_token(self):
+        from lambdas.common.email_helpers import form_url
+
+        assert form_url("poll-1") == "https://xomforms.xomware.com/f/poll-1"
+
+
+class TestInvitesResolve:
+    @patch("lambdas.invites_resolve.handler.get_poll")
+    def test_resolves_a_token_to_its_recipient(self, mock_get, mock_context, public_event):
+        from lambdas.invites_resolve.handler import handler
+
+        mock_get.return_value = {
+            **OWNED,
+            "invites": [{"email": "sam@x.com", "name": "Sam", "token": "tok1"}],
+        }
+        event = public_event(
+            path="/invites/resolve",
+            queryStringParameters={"pollId": "poll-1", "t": "tok1"},
+        )
+
+        body = json.loads(handler(event, mock_context)["body"])
+        assert body["email"] == "sam@x.com"
+        assert body["name"] == "Sam"
+
+    @patch("lambdas.invites_resolve.handler.get_poll")
+    def test_an_unknown_token_is_a_404(self, mock_get, mock_context, public_event):
+        from lambdas.invites_resolve.handler import handler
+
+        mock_get.return_value = {**OWNED, "invites": [{"email": "sam@x.com", "token": "tok1"}]}
+        event = public_event(
+            path="/invites/resolve",
+            queryStringParameters={"pollId": "poll-1", "t": "guessed"},
+        )
+
+        assert handler(event, mock_context)["statusCode"] == 404
+
+    @patch("lambdas.invites_resolve.handler.get_poll")
+    def test_a_token_from_another_form_does_not_resolve(
+        self, mock_get, mock_context, public_event
+    ):
+        from lambdas.invites_resolve.handler import handler
+
+        mock_get.return_value = {**OWNED, "invites": []}
+        event = public_event(
+            path="/invites/resolve",
+            queryStringParameters={"pollId": "poll-1", "t": "tok-from-elsewhere"},
+        )
+
+        assert handler(event, mock_context)["statusCode"] == 404
+
+    @patch("lambdas.invites_resolve.handler.get_poll")
+    def test_requires_a_token(self, mock_get, mock_context, public_event):
+        """Without one it would list whoever was invited."""
+        from lambdas.invites_resolve.handler import handler
+
+        event = public_event(
+            path="/invites/resolve", queryStringParameters={"pollId": "poll-1"}
+        )
+        assert handler(event, mock_context)["statusCode"] == 400
