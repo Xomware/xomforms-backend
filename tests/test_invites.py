@@ -275,3 +275,38 @@ class TestInviteDetails:
         html_body, text_body = render_invite("Sam", "Dom", "Draft night", "p1", self.POLL)
         assert "{{" not in html_body
         assert "{{" not in text_body
+
+
+class TestInviteInstructions:
+    def test_includes_the_organizers_note(self):
+        from lambdas.common.email_helpers import render_invite
+
+        poll = {"instructions": "Only pick slots you can commit to all season."}
+        html_body, text_body = render_invite("Sam", "Dom", "League", "p1", poll)
+        assert "all season" in html_body
+        assert "all season" in text_body
+        assert "note from the organizer" in text_body.lower()
+
+    def test_escapes_the_note(self):
+        """Creator free text landing inside email markup."""
+        from lambdas.common.email_helpers import render_invite
+
+        html_body, _ = render_invite(
+            "Sam", "Dom", "League", "p1", {"instructions": "<script>alert(1)</script>"}
+        )
+        assert "<script>" not in html_body
+        assert "&lt;script&gt;" in html_body
+
+    def test_keeps_line_breaks_the_creator_typed(self):
+        from lambdas.common.email_helpers import render_invite
+
+        html_body, _ = render_invite("Sam", "Dom", "League", "p1", {"instructions": "one\ntwo"})
+        assert "one<br />two" in html_body
+
+    def test_omits_the_block_when_there_is_no_note(self):
+        from lambdas.common.email_helpers import render_invite
+
+        html_body, text_body = render_invite("Sam", "Dom", "League", "p1", {"instructions": "   "})
+        assert "note from the organizer" not in html_body.lower()
+        assert "{{instructionsBlock}}" not in html_body
+        assert "{{instructionsText}}" not in text_body
