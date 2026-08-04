@@ -214,3 +214,64 @@ class TestInvitesList:
         )
 
         assert handler(event, mock_context)["statusCode"] == 403
+
+
+class TestInviteDetails:
+    """
+    The details block is the one placeholder holding real markup, so it is
+    substituted after the escaping pass -- worth pinning down.
+    """
+
+    POLL = {
+        "eventDurationMinutes": 180,
+        "earliestStartMinute": 18 * 60,
+        "latestStartMinute": 21 * 60,
+        "startDate": "2026-08-09",
+        "endDate": "2026-08-16",
+        "timezone": "America/New_York",
+    }
+
+    def test_states_that_the_recipient_picks_a_start_time(self):
+        from lambdas.common.email_helpers import render_invite
+
+        html_body, text_body = render_invite("Sam", "Dom", "Draft night", "p1", self.POLL)
+        assert "start time" in html_body
+        assert "6:00 PM - 9:00 PM" in text_body
+
+    def test_includes_the_event_length(self):
+        from lambdas.common.email_helpers import render_invite
+
+        _, text_body = render_invite("Sam", "Dom", "Draft night", "p1", self.POLL)
+        assert "3 hours" in text_body
+
+    def test_uses_the_hosted_logo(self):
+        from lambdas.common.email_helpers import render_invite
+
+        html_body, _ = render_invite("Sam", "Dom", "Draft night", "p1", self.POLL)
+        # Not a data: URI -- Gmail and Outlook both drop those.
+        assert "/assets/xomforms-banner.png" in html_body
+        assert "data:image" not in html_body
+
+    def test_escapes_values_inside_the_details_block(self):
+        from lambdas.common.email_helpers import render_invite
+
+        html_body, _ = render_invite(
+            "Sam", "Dom", "Draft", "p1", {**self.POLL, "timezone": "<script>x</script>"}
+        )
+        assert "<script>" not in html_body
+
+    def test_omits_the_block_entirely_for_a_form_with_no_schedule(self):
+        """A Q&A form has no start range; an empty styled box would look broken."""
+        from lambdas.common.email_helpers import render_invite
+
+        html_body, text_body = render_invite("Sam", "Dom", "RSVP", "p1", None)
+        assert "{{detailsBlock}}" not in html_body
+        assert "{{detailsText}}" not in text_body
+        assert "Event length" not in html_body
+
+    def test_leaves_no_unsubstituted_tokens(self):
+        from lambdas.common.email_helpers import render_invite
+
+        html_body, text_body = render_invite("Sam", "Dom", "Draft night", "p1", self.POLL)
+        assert "{{" not in html_body
+        assert "{{" not in text_body
