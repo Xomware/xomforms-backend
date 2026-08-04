@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from lambdas.common.constants import (
     ALLOWED_GRANULARITY_MINUTES,
+    ALLOWED_LOCATION_TYPES,
     ALLOWED_RESULTS_VISIBILITY,
     DEFAULT_RESULTS_VISIBILITY,
     RESULTS_VISIBILITY_ALWAYS,
@@ -173,6 +174,18 @@ class CreatePollRequest(BaseModel):
     # describes the EVENT; this tells people how to answer ("league night --
     # only pick slots you can commit to all season").
     instructions: str | None = Field(default=None, max_length=1000)
+    # ---- Location -------------------------------------------------------
+    # locationType None means the creator didn't say, which is different from
+    # "virtual" -- a form with no location stated should not claim to be one.
+    locationType: str | None = None
+    locationName: str | None = Field(default=None, max_length=200)
+    locationAddress: str | None = Field(default=None, max_length=500)
+    # Meeting link for a virtual event. Kept separate from address so the UI
+    # can render it as a link rather than text.
+    locationUrl: str | None = Field(default=None, max_length=2000)
+    locationLat: float | None = Field(default=None, ge=-90, le=90)
+    locationLon: float | None = Field(default=None, ge=-180, le=180)
+
     # May a respondent change their answer after submitting? Defaults to true --
     # people mistype availability constantly, and a creator can switch it off.
     allowResponseEdits: bool = True
@@ -224,6 +237,15 @@ class CreatePollRequest(BaseModel):
             return v
         if v not in ALLOWED_RESULTS_VISIBILITY:
             raise ValueError(f"resultsVisibility must be one of {ALLOWED_RESULTS_VISIBILITY}")
+        return v
+
+    @field_validator("locationType")
+    @classmethod
+    def location_type_is_allowed(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        if v not in ALLOWED_LOCATION_TYPES:
+            raise ValueError(f"locationType must be one of {ALLOWED_LOCATION_TYPES}")
         return v
 
     @field_validator("timezone")
@@ -439,6 +461,12 @@ class PollResponse(BaseModel):
     resultsVisibility: str | None = None
     allowResponseEdits: bool = True
     instructions: str | None = None
+    locationType: str | None = None
+    locationName: str | None = None
+    locationAddress: str | None = None
+    locationUrl: str | None = None
+    locationLat: float | None = None
+    locationLon: float | None = None
     closeAt: datetime | None = None
     eventDurationMinutes: int | None = None
     createdAt: datetime
@@ -548,6 +576,17 @@ class UpdatePollRequest(BaseModel):
     # ending up with a grid that has no shortcuts at all.
     quickFilters: list[str] | None = Field(default=None, max_length=12)
     instructions: str | None = Field(default=None, max_length=1000)
+    # ---- Location -------------------------------------------------------
+    # locationType None means the creator didn't say, which is different from
+    # "virtual" -- a form with no location stated should not claim to be one.
+    locationType: str | None = None
+    locationName: str | None = Field(default=None, max_length=200)
+    locationAddress: str | None = Field(default=None, max_length=500)
+    # Meeting link for a virtual event. Kept separate from address so the UI
+    # can render it as a link rather than text.
+    locationUrl: str | None = Field(default=None, max_length=2000)
+    locationLat: float | None = Field(default=None, ge=-90, le=90)
+    locationLon: float | None = Field(default=None, ge=-180, le=180)
 
     @field_validator("title")
     @classmethod
@@ -565,6 +604,15 @@ class UpdatePollRequest(BaseModel):
             return v
         if v not in ALLOWED_RESULTS_VISIBILITY:
             raise ValueError(f"resultsVisibility must be one of {ALLOWED_RESULTS_VISIBILITY}")
+        return v
+
+    @field_validator("locationType")
+    @classmethod
+    def location_type_is_allowed(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        if v not in ALLOWED_LOCATION_TYPES:
+            raise ValueError(f"locationType must be one of {ALLOWED_LOCATION_TYPES}")
         return v
 
     def changes(self) -> dict:

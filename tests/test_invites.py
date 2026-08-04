@@ -355,3 +355,45 @@ class TestInviteMarkupHealth:
         html_body = self._html()
         assert "<script" not in html_body.lower()
         assert "stylesheet" not in html_body.lower()
+
+
+class TestInviteLocation:
+    def test_in_person_shows_venue_and_address(self):
+        from lambdas.common.email_helpers import render_invite
+
+        poll = {
+            "locationType": "in_person",
+            "locationName": "Fenway Park",
+            "locationAddress": "4 Jersey St, Boston, MA",
+        }
+        _, text_body = render_invite("Sam", "Dom", "Draft", "p1", poll)
+        assert "Fenway Park" in text_body
+        assert "4 Jersey St" in text_body
+
+    def test_address_alone_is_enough(self):
+        from lambdas.common.email_helpers import render_invite
+
+        poll = {"locationType": "in_person", "locationAddress": "4 Jersey St, Boston, MA"}
+        _, text_body = render_invite("Sam", "Dom", "Draft", "p1", poll)
+        assert "4 Jersey St" in text_body
+
+    def test_virtual_says_online(self):
+        from lambdas.common.email_helpers import render_invite
+
+        _, text_body = render_invite("Sam", "Dom", "Draft", "p1", {"locationType": "virtual"})
+        assert "Online" in text_body
+
+    def test_no_location_claims_nothing(self):
+        """Unstated is not the same as virtual."""
+        from lambdas.common.email_helpers import render_invite
+
+        _, text_body = render_invite("Sam", "Dom", "Draft", "p1", {"eventDurationMinutes": 60})
+        assert "Online" not in text_body
+        assert "Where" not in text_body
+
+    def test_escapes_a_hostile_venue_name(self):
+        from lambdas.common.email_helpers import render_invite
+
+        poll = {"locationType": "in_person", "locationName": "<script>x</script>"}
+        html_body, _ = render_invite("Sam", "Dom", "Draft", "p1", poll)
+        assert "<script>" not in html_body

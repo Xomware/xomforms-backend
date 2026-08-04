@@ -9,6 +9,8 @@ those under respondents who already answered would invalidate submissions
 story, not a toggle.
 """
 
+from decimal import Decimal
+
 from pydantic import ValidationError as PydanticValidationError
 
 from lambdas.common.logger import get_logger
@@ -37,6 +39,11 @@ def handler(event, context):
     get_poll_for_creator(req.pollId, email, function="handler")
 
     changes = req.changes()
+
+    # DynamoDB rejects Python floats, so coordinates have to go in as Decimal.
+    for key in ("locationLat", "locationLon"):
+        if key in changes:
+            changes[key] = Decimal(str(changes[key]))
     if not changes:
         raise ValidationError(
             message="no settings supplied to update", function="handler"
