@@ -168,6 +168,11 @@ class CreatePollRequest(BaseModel):
     resultsVisibility: str | None = None
     # Quick-filter pills offered on the respondent grid; empty uses defaults.
     quickFilters: list[str] | None = Field(default=None, max_length=12)
+    # Free-text note from the creator, shown to respondents above the grid and
+    # included in the invite email. Distinct from `description`, which
+    # describes the EVENT; this tells people how to answer ("league night --
+    # only pick slots you can commit to all season").
+    instructions: str | None = Field(default=None, max_length=1000)
     # May a respondent change their answer after submitting? Defaults to true --
     # people mistype availability constantly, and a creator can switch it off.
     allowResponseEdits: bool = True
@@ -433,6 +438,7 @@ class PollResponse(BaseModel):
     showResultsToRespondents: bool
     resultsVisibility: str | None = None
     allowResponseEdits: bool = True
+    instructions: str | None = None
     closeAt: datetime | None = None
     eventDurationMinutes: int | None = None
     createdAt: datetime
@@ -541,6 +547,7 @@ class UpdatePollRequest(BaseModel):
     # "use the client's defaults", so a creator can clear the choice without
     # ending up with a grid that has no shortcuts at all.
     quickFilters: list[str] | None = Field(default=None, max_length=12)
+    instructions: str | None = Field(default=None, max_length=1000)
 
     @field_validator("title")
     @classmethod

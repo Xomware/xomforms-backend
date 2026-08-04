@@ -8,7 +8,7 @@ Hi {{recipientName}},
 
 They're collecting responses and would love your input. It only takes a
 minute — open the form and pick the times that work:
-{{detailsText}}
+{{instructionsText}}{{detailsText}}
   {{formUrl}}
 
 --------------------------------------------------------------------

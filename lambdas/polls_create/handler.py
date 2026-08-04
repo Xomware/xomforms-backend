@@ -50,6 +50,7 @@ def handler(event, context):
         "resultsVisibility": req.resultsVisibility or DEFAULT_RESULTS_VISIBILITY,
         "allowResponseEdits": req.allowResponseEdits,
         "quickFilters": req.quickFilters or [],
+        "instructions": (req.instructions or "").strip() or None,
         "createdAt": get_iso_timestamp(),
     }
 

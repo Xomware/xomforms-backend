@@ -140,6 +140,35 @@ def _details_text(rows: list[tuple[str, str]]) -> str:
     return f"\n{lines}\n"
 
 
+def _instructions_html(instructions: str | None) -> str:
+    """
+    The organizer's own note, quoted so it reads as their words rather than
+    ours. Escaped like every other creator-supplied value; newlines become
+    <br> because the creator typed them into a textarea and expects them kept.
+    """
+    text = (instructions or "").strip()
+    if not text:
+        return ""
+    body = html.escape(text).replace("\n", "<br />")
+    return (
+        '              <table role="presentation" cellpadding="0" cellspacing="0" border="0" '
+        'style="width:100%; margin:0 0 22px 0; font-family:Arial,Helvetica,sans-serif;">'
+        '<tr><td style="padding:14px 18px; background-color:#fff6cf; border-left:4px solid #e0a417; '
+        'border-radius:10px; font-size:14px; line-height:21px; color:#201733;">'
+        f'<strong style="display:block; margin-bottom:4px; font-size:12px; letter-spacing:0.04em; '
+        f'text-transform:uppercase; color:#8a6a12;">A note from the organizer</strong>{body}'
+        "</td></tr></table>\n"
+    )
+
+
+def _instructions_text(instructions: str | None) -> str:
+    text = (instructions or "").strip()
+    if not text:
+        return ""
+    indented = "\n".join(f"  {line}" for line in text.splitlines())
+    return f"\nA note from the organizer:\n{indented}\n"
+
+
 def render_invite(
     recipient_name: str | None,
     sender_name: str,
@@ -181,6 +210,10 @@ def render_invite(
     for token, value in raw.items():
         html_out = html_out.replace("{{" + token + "}}", html.escape(str(value), quote=True))
         text_out = text_out.replace("{{" + token + "}}", str(value))
+
+    instructions = (poll or {}).get("instructions")
+    html_out = html_out.replace("{{instructionsBlock}}", _instructions_html(instructions))
+    text_out = text_out.replace("{{instructionsText}}", _instructions_text(instructions))
 
     rows = _detail_rows(poll)
     html_out = html_out.replace("{{detailsBlock}}", _details_html(rows))
