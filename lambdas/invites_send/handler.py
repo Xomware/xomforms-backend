@@ -12,6 +12,7 @@ persisted onto the poll for /invites/list to read back later.
 """
 
 import re
+import uuid
 
 from lambdas.common.logger import get_logger
 from lambdas.common.errors import handle_errors, ValidationError
@@ -101,9 +102,23 @@ def handler(event, context):
     form_title = poll.get("title") or "a form"
     sent_at = get_iso_timestamp()
 
+    # Reuse an existing token for a re-invited address so an earlier email's
+    # link keeps working -- people click the one they happen to still have.
+    existing_tokens = {
+        i.get("email"): i.get("token")
+        for i in (poll.get("invites") or [])
+        if isinstance(i, dict) and i.get("token")
+    }
+
     results: list[dict] = []
     for recipient in recipients:
-        record = {"email": recipient["email"], "name": recipient["name"], "sentAt": sent_at}
+        token = existing_tokens.get(recipient["email"]) or uuid.uuid4().hex
+        record = {
+            "email": recipient["email"],
+            "name": recipient["name"],
+            "sentAt": sent_at,
+            "token": token,
+        }
         try:
             send_invite(
                 to_email=recipient["email"],
@@ -112,6 +127,7 @@ def handler(event, context):
                 form_title=form_title,
                 poll_id=poll_id,
                 poll=poll,
+                invite_token=token,
             )
             record["status"] = "sent"
         except Exception as err:
