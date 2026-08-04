@@ -18,6 +18,24 @@ log = get_logger(__file__)
 HANDLER = "responses_submit_public"
 
 
+def _require_email(email: str | None) -> None:
+    """
+    Guests must leave an address.
+
+    A creator finalizes a time and notifies everyone who answered -- without a
+    contact address a guest response is a vote that can never be told the
+    outcome. The model already validates the SHAPE; this enforces presence,
+    which only applies on the guest route (an authed caller's token supplies
+    it).
+    """
+    if not email:
+        raise ValidationError(
+            message="email is required so the organizer can tell you the result",
+            function="handler",
+            field="email",
+        )
+
+
 def _is_qa(poll: dict) -> bool:
     return poll.get("formType") == "qa" or bool(poll.get("fields"))
 
@@ -52,6 +70,7 @@ def handler(event, context):
             req = SubmitAnswersRequest(**body)
         except PydanticValidationError as err:
             raise ValidationError(message=str(err), function="handler")
+        _require_email(req.email)
         result = submit_answers(
             poll, respondent_key=respondent_key, display_name=req.displayName, answers=req.answers
         )
@@ -64,7 +83,14 @@ def handler(event, context):
     except PydanticValidationError as err:
         raise ValidationError(message=str(err), function="handler")
 
-    result = submit_availability(poll, respondent_key=respondent_key, display_name=req.displayName, blocks=req.blocks)
+    _require_email(req.email)
+    result = submit_availability(
+        poll,
+        respondent_key=respondent_key,
+        display_name=req.displayName,
+        blocks=req.blocks,
+        email=req.email,
+    )
     log.info(f"Guest response submitted: poll={poll_id} respondent={respondent_key}")
 
     return success_response(result)

@@ -40,7 +40,14 @@ def handler(event, context):
             req = SubmitAnswersRequest(**body)
         except PydanticValidationError as err:
             raise ValidationError(message=str(err), function="handler")
-        result = submit_answers(poll, respondent_key=email, display_name=req.displayName, answers=req.answers)
+        result = submit_answers(
+            poll,
+            respondent_key=email,
+            display_name=req.displayName,
+            answers=req.answers,
+            # Their token already carries it -- don't make them retype it.
+            email=email,
+        )
         log.info(f"Answers submitted: poll={poll_id} respondent={email}")
         return success_response(result)
 
@@ -50,7 +57,13 @@ def handler(event, context):
     except PydanticValidationError as err:
         raise ValidationError(message=str(err), function="handler")
 
-    result = submit_availability(poll, respondent_key=email, display_name=req.displayName, blocks=req.blocks)
+    result = submit_availability(
+        poll,
+        respondent_key=email,
+        display_name=req.displayName,
+        blocks=req.blocks,
+        email=email,
+    )
     log.info(f"Response submitted: poll={poll_id} respondent={email}")
 
     return success_response(result)

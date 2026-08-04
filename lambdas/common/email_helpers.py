@@ -321,3 +321,124 @@ def send_invite(
     except Exception as err:
         log.error(f"SES send failed for poll={poll_id}: {err}")
         raise EmailSendError(message=str(err), function="send_invite")
+
+
+# ---------------------------------------------------------------------------
+# Finalize notification -- "the time is set"
+# ---------------------------------------------------------------------------
+
+def render_confirmation(
+    recipient_name: str | None,
+    sender_name: str,
+    poll: dict,
+    when_label: str,
+) -> tuple[str, str]:
+    """
+    The "it's confirmed" email, reusing the invite shell so both messages look
+    like they come from the same product.
+
+    Calendar options are LINKS, not an attachment: SES Simple can't carry one,
+    and switching to raw MIME for a 20-line text file would mean hand-rolling
+    multipart boundaries. A hosted .ics opens in Apple Mail and Outlook exactly
+    as an attachment would, and Google gets its own one-click template URL.
+    """
+    from lambdas.common.calendar_helpers import google_calendar_url, ics_url
+
+    html_template, text_template = _load_templates()
+
+    safe_recipient = recipient_name.strip() if recipient_name and recipient_name.strip() else "there"
+    year = str(datetime.now(timezone.utc).year)
+    poll_id = poll["pollId"]
+    gcal = google_calendar_url(poll)
+    ics = ics_url(poll_id)
+
+    raw = {
+        "recipientName": safe_recipient,
+        "senderName": sender_name,
+        "formTitle": poll.get("title") or "your event",
+        "formUrl": f"{WEB_BASE_URL}/f/{poll_id}",
+        "year": year,
+        "logoUrl": f"{WEB_BASE_URL}/assets/xomforms-banner.png",
+        "iconUrl": f"{WEB_BASE_URL}/assets/xomforms-icon-256.png",
+    }
+
+    html_out = html_template
+    text_out = text_template
+    for token, value in raw.items():
+        html_out = html_out.replace("{{" + token + "}}", html.escape(str(value), quote=True))
+        text_out = text_out.replace("{{" + token + "}}", str(value))
+
+    # Swap the invite's ask for the confirmation.
+    html_out = html_out.replace(
+        "needs your availability", "confirmed the time"
+    ).replace(
+        "You&#x27;re invited to", "It&#x27;s happening"
+    ).replace(
+        "is collecting responses and would love your input. It only takes a minute &mdash; tap the button below to open the form and pick the times that work.",
+        f"picked a time for this. It&#x27;s now on the calendar &mdash; add it to yours below.",
+    ).replace("Pick your times &rarr;", "Add to calendar &rarr;").replace(
+        "Pick your times", "Add to calendar"
+    ).replace("Takes about a minute &middot; no account needed", "One tap &middot; adds to your calendar")
+    html_out = html_out.replace("{{formUrl}}", html.escape(ics, quote=True))
+    # The CTA points at the calendar file rather than back at the form.
+    html_out = html_out.replace(html.escape(raw["formUrl"], quote=True), html.escape(ics, quote=True), 1)
+
+    confirmed_rows = [("When", when_label)]
+    location_rows = _detail_rows(poll)
+    confirmed_rows += [r for r in location_rows if r[0] in ("Where", "Address")]
+    html_out = html_out.replace("{{instructionsBlock}}", _instructions_html(poll.get("instructions")))
+    html_out = html_out.replace("{{detailsBlock}}", _details_html(confirmed_rows))
+    html_out = html_out.replace(
+        "</table>\n        <!-- /Card -->",
+        "</table>\n        <!-- /Card -->",
+    )
+
+    text_out = (
+        text_out.replace("you've been invited", "the time is set")
+        .replace("invited you to fill out a Xomforms poll:", "confirmed the time for:")
+        .replace(
+            "They're collecting responses and would love your input. It only takes a\nminute — open the form and pick the times that work:",
+            "It's confirmed. Add it to your calendar:",
+        )
+    )
+    text_out = text_out.replace("{{instructionsText}}", _instructions_text(poll.get("instructions")))
+    text_out = text_out.replace("{{detailsText}}", _details_text(confirmed_rows))
+    text_out = text_out.replace(raw["formUrl"], f"{ics}\n\n  Google Calendar: {gcal}\n\n  Form: {raw['formUrl']}")
+
+    return html_out, text_out
+
+
+def send_confirmation(
+    to_email: str,
+    recipient_name: str | None,
+    sender_name: str,
+    poll: dict,
+    when_label: str,
+) -> None:
+    """Send one confirmation. Raises EmailSendError so the caller records status."""
+    html_body, text_body = render_confirmation(recipient_name, sender_name, poll, when_label)
+    from_address = _ssm_value(f"/{PRODUCT}/ses/FROM_ADDRESS", f"noreply@{PRODUCT}.xomware.com")
+    config_set = _ssm_value(f"/{PRODUCT}/ses/CONFIGURATION_SET", f"{PRODUCT}-invites")
+
+    try:
+        ses.send_email(
+            FromEmailAddress=from_address,
+            Destination={"ToAddresses": [to_email]},
+            ConfigurationSetName=config_set,
+            Content={
+                "Simple": {
+                    "Subject": {
+                        "Data": f"Confirmed: {poll.get('title') or 'your event'} \u2014 {when_label}",
+                        "Charset": "UTF-8",
+                    },
+                    "Body": {
+                        "Html": {"Data": html_body, "Charset": "UTF-8"},
+                        "Text": {"Data": text_body, "Charset": "UTF-8"},
+                    },
+                }
+            },
+        )
+        log.info(f"Confirmation sent for poll={poll.get('pollId')}")
+    except Exception as err:
+        log.error(f"SES confirmation failed for poll={poll.get('pollId')}: {err}")
+        raise EmailSendError(message=str(err), function="send_confirmation")

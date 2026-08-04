@@ -21,17 +21,17 @@ class TestResponsesSubmitPublicHandler:
         event = public_event(
             httpMethod="POST",
             path="/responses/submit-guest",
-            body=json.dumps({"pollId": "poll-1", "displayName": "Guest Dom", "blocks": [], "guestId": "abc"}),
+            body=json.dumps({"pollId": "poll-1", "displayName": "Guest Dom", "email": "guest@example.com", "blocks": [], "guestId": "abc"}),
         )
         response = handler(event, mock_context)
 
         assert response["statusCode"] == 200
-        mock_submit.assert_called_once_with(
-            {"pollId": "poll-1", "guestAllowed": True},
-            respondent_key="guest#abc",
-            display_name="Guest Dom",
-            blocks=[],
-        )
+        mock_submit.assert_called_once()
+        kwargs = mock_submit.call_args[1]
+        assert kwargs["respondent_key"] == "guest#abc"
+        # Guests must leave an address -- it's the only way to tell them the
+        # outcome once a time is picked.
+        assert kwargs["email"] == "guest@example.com"
 
     @patch("lambdas.responses_submit_public.handler.submit_availability")
     @patch("lambdas.responses_submit_public.handler.get_poll")
@@ -44,7 +44,7 @@ class TestResponsesSubmitPublicHandler:
         event = public_event(
             httpMethod="POST",
             path="/responses/submit-guest",
-            body=json.dumps({"pollId": "poll-1", "displayName": "Guest Dom", "blocks": []}),
+            body=json.dumps({"pollId": "poll-1", "displayName": "Guest Dom", "email": "guest@example.com", "blocks": []}),
         )
         response = handler(event, mock_context)
 
@@ -64,7 +64,7 @@ class TestResponsesSubmitPublicHandler:
         event = public_event(
             httpMethod="POST",
             path="/responses/submit-guest",
-            body=json.dumps({"pollId": "poll-1", "displayName": "Guest Dom", "blocks": []}),
+            body=json.dumps({"pollId": "poll-1", "displayName": "Guest Dom", "email": "guest@example.com", "blocks": []}),
         )
         response = handler(event, mock_context)
 
@@ -80,7 +80,7 @@ class TestResponsesSubmitPublicHandler:
         event = public_event(
             httpMethod="POST",
             path="/responses/submit-guest",
-            body=json.dumps({"pollId": "does-not-exist", "displayName": "Guest Dom", "blocks": []}),
+            body=json.dumps({"pollId": "does-not-exist", "displayName": "Guest Dom", "email": "guest@example.com", "blocks": []}),
         )
         response = handler(event, mock_context)
 
@@ -97,7 +97,7 @@ class TestResponsesSubmitPublicHandler:
         event = public_event(
             httpMethod="POST",
             path="/responses/submit-guest",
-            body=json.dumps({"pollId": "poll-1", "displayName": "Guest Dom", "blocks": []}),
+            body=json.dumps({"pollId": "poll-1", "displayName": "Guest Dom", "email": "guest@example.com", "blocks": []}),
         )
         assert event["requestContext"] == {}
 

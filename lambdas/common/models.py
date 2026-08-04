@@ -8,6 +8,7 @@ out explicitly in docs/features/xomforms/PLAN.md. lambdas/common/ otherwise
 stays structurally identical to xomify-backend for portability.
 """
 
+import re
 from datetime import date, datetime
 from typing import Annotated, Any, Literal, Union
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -28,6 +29,8 @@ from lambdas.common.constants import (
     MAX_GRID_BLOCKS,
     MIN_EVENT_DURATION_MINUTES,
 )
+
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 # ---------------------------------------------------------------------------
 # Q&A form field definitions (Phase 1 of the form-builder). These are ADDITIVE:
@@ -397,6 +400,25 @@ class SubmitAvailabilityRequest(BaseModel):
 
     displayName: str = Field(min_length=1, max_length=100)
     blocks: list[str] = Field(default_factory=list, max_length=MAX_GRID_BLOCKS)
+    # Contact email. Required from GUESTS so a creator can actually reach the
+    # people who answered -- notifying everyone when a time is picked is the
+    # whole point. Authed respondents already have one on their token, so the
+    # handler fills it in and this stays optional at the type level.
+    email: str | None = Field(default=None, max_length=254)
+
+    @field_validator("email")
+    @classmethod
+    def email_looks_like_one(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        cleaned = v.strip().lower()
+        if not cleaned:
+            return None
+        # Deliberately permissive: real addresses defeat clever patterns, and
+        # SES is the actual authority on deliverability. This catches typos.
+        if not _EMAIL_RE.match(cleaned):
+            raise ValueError("email must be a valid email address")
+        return cleaned
 
     @field_validator("displayName")
     @classmethod
@@ -425,6 +447,20 @@ class SubmitAnswersRequest(BaseModel):
 
     displayName: str = Field(min_length=1, max_length=100)
     answers: dict[str, Any] = Field(default_factory=dict)
+    # Same contract as SubmitAvailabilityRequest.email.
+    email: str | None = Field(default=None, max_length=254)
+
+    @field_validator("email")
+    @classmethod
+    def email_looks_like_one(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        cleaned = v.strip().lower()
+        if not cleaned:
+            return None
+        if not _EMAIL_RE.match(cleaned):
+            raise ValueError("email must be a valid email address")
+        return cleaned
 
     @field_validator("displayName")
     @classmethod
@@ -467,6 +503,11 @@ class PollResponse(BaseModel):
     locationUrl: str | None = None
     locationLat: float | None = None
     locationLon: float | None = None
+    # Set once the creator picks the winning time. Its presence is what makes
+    # a form "decided" rather than merely closed.
+    finalBlockId: str | None = None
+    finalStartUtc: datetime | None = None
+    finalizedAt: datetime | None = None
     closeAt: datetime | None = None
     eventDurationMinutes: int | None = None
     createdAt: datetime
@@ -654,3 +695,27 @@ def resolve_allow_response_edits(poll: dict) -> bool:
     """
     value = poll.get("allowResponseEdits")
     return True if value is None else bool(value)
+
+
+class FinalizePollRequest(BaseModel):
+    """
+    The creator's decision: which start time won.
+
+    blockId is a grid blockId ("YYYY-MM-DDTHH:MM" in the poll's timezone), so
+    the chosen time is expressed in the same vocabulary the grid and the
+    responses already use rather than a free-form timestamp that could drift
+    from any real slot.
+    """
+
+    pollId: str = Field(min_length=1)
+    blockId: str = Field(min_length=1, max_length=32)
+    # Notifying everyone is the point, but a creator fixing a mistaken choice
+    # shouldn't have to spam them a second time.
+    notify: bool = True
+
+    @field_validator("blockId")
+    @classmethod
+    def block_id_shape(cls, v: str) -> str:
+        if not re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$", v.strip()):
+            raise ValueError("blockId must look like YYYY-MM-DDTHH:MM")
+        return v.strip()
