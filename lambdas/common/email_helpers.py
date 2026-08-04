@@ -16,7 +16,8 @@ GetParameter per recipient would be pure latency on a bulk send.
 
 import html
 import os
-from datetime import datetime, timezone
+from datetime import date, datetime, time as dtime, timezone
+from zoneinfo import ZoneInfo
 from functools import lru_cache
 from pathlib import Path
 
@@ -82,6 +83,34 @@ def _duration_label(minutes: int) -> str:
     return f"{rounded} hour{'' if rounded == 1 else 's'}"
 
 
+def timezone_label(tz_name: str, on: date | None = None) -> str:
+    """
+    "America/New_York" -> "New York (EDT)".
+
+    IANA identifiers are how the grid and the backend must talk about zones,
+    but they read like file paths in an email. Python ships no CLDR data, so
+    there's no "Eastern Time" string to look up -- the abbreviation from
+    zoneinfo is the closest correct thing that needs no extra dependency.
+
+    Resolved at the event's start date rather than send time, so a form for
+    November doesn't get labelled EDT because the invite went out in August.
+    """
+    city = tz_name.split("/")[-1].replace("_", " ")
+    if tz_name in ("UTC", "Etc/UTC"):
+        return "UTC"
+    try:
+        at = datetime.combine(on or datetime.now(timezone.utc).date(), dtime(12, 0))
+        abbr = at.replace(tzinfo=ZoneInfo(tz_name)).strftime("%Z")
+    except Exception:
+        # Unknown zone: the city still beats printing a path.
+        return city
+    # Some zones report a numeric offset rather than letters ("+04"), which
+    # adds nothing next to the city name.
+    if not abbr or abbr[0] in "+-":
+        return city
+    return f"{city} ({abbr})"
+
+
 def _detail_rows(poll: dict | None) -> list[tuple[str, str]]:
     """
     The facts a recipient needs before opening the form. Chiefly: they are
@@ -125,7 +154,14 @@ def _detail_rows(poll: dict | None) -> list[tuple[str, str]]:
         )
         rows.append(("You pick a start time between", window))
     if poll.get("timezone"):
-        rows.append(("Organizer's timezone", str(poll["timezone"])))
+        start = poll.get("startDate")
+        on = None
+        if start:
+            try:
+                on = date.fromisoformat(str(start))
+            except ValueError:
+                on = None
+        rows.append(("Times shown in", timezone_label(str(poll["timezone"]), on)))
     return rows
 
 

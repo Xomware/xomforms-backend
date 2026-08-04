@@ -397,3 +397,51 @@ class TestInviteLocation:
         poll = {"locationType": "in_person", "locationName": "<script>x</script>"}
         html_body, _ = render_invite("Sam", "Dom", "Draft", "p1", poll)
         assert "<script>" not in html_body
+
+
+class TestTimezoneLabel:
+    def test_reads_as_a_place_not_a_path(self):
+        from datetime import date
+        from lambdas.common.email_helpers import timezone_label
+
+        assert timezone_label("America/New_York", date(2026, 8, 9)) == "New York (EDT)"
+
+    def test_resolves_at_the_event_date_not_send_time(self):
+        """An invite sent in August for a November event must not say EDT."""
+        from datetime import date
+        from lambdas.common.email_helpers import timezone_label
+
+        assert timezone_label("America/New_York", date(2026, 1, 9)) == "New York (EST)"
+
+    def test_underscores_become_spaces(self):
+        from datetime import date
+        from lambdas.common.email_helpers import timezone_label
+
+        assert timezone_label("America/Los_Angeles", date(2026, 8, 9)).startswith("Los Angeles")
+
+    def test_utc_stays_utc(self):
+        from lambdas.common.email_helpers import timezone_label
+
+        assert timezone_label("UTC") == "UTC"
+        assert timezone_label("Etc/UTC") == "UTC"
+
+    def test_unknown_zone_falls_back_to_the_city(self):
+        from lambdas.common.email_helpers import timezone_label
+
+        assert timezone_label("Mars/Olympus_Mons") == "Olympus Mons"
+
+    def test_numeric_abbreviations_are_dropped(self):
+        """Zones reporting "+04" add nothing next to the city name."""
+        from datetime import date
+        from lambdas.common.email_helpers import timezone_label
+
+        label = timezone_label("Asia/Dubai", date(2026, 8, 9))
+        assert "+" not in label
+
+    def test_the_email_uses_it(self):
+        from lambdas.common.email_helpers import render_invite
+
+        poll = {"timezone": "America/New_York", "startDate": "2026-08-09"}
+        _, text_body = render_invite("Sam", "Dom", "Draft", "p1", poll)
+        assert "America/New_York" not in text_body
+        assert "New York (EDT)" in text_body
