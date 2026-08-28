@@ -25,8 +25,6 @@ on:
         type: boolean
         default: true
 
-env:
-  AWS_REGION: "us-east-1"
 
 jobs:
   detect-changes:
@@ -134,12 +132,21 @@ jobs:
         run: pytest tests/ -v --tb=short
 
   deploy-layer:
+    permissions:
+      id-token: write # mint the OIDC token traded for the deploy role
+      contents: read
     needs: [detect-changes, test-lambdas]
     if: always() && needs.detect-changes.outputs.common_changed == 'true' && (needs.test-lambdas.result == 'success' || needs.test-lambdas.result == 'skipped')
     runs-on: ubuntu-latest
     outputs:
       layer_arn: ${{ steps.deploy-layer.outputs.layer_arn }}
     steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+
       - name: Checkout code
         uses: actions/checkout@v6
 
@@ -157,9 +164,6 @@ jobs:
 
       - name: Deploy layer
         id: deploy-layer
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         run: |
           LAYER_OUTPUT=$(aws lambda publish-layer-version \
             --layer-name xomforms-shared-packages \
@@ -173,6 +177,9 @@ jobs:
           echo "Published layer: $LAYER_ARN"
 
   update-all-lambdas-layer:
+    permissions:
+      id-token: write # mint the OIDC token traded for the deploy role
+      contents: read
     needs: [detect-changes, deploy-layer]
     if: always() && needs.detect-changes.outputs.common_changed == 'true' && needs.deploy-layer.result == 'success'
     runs-on: ubuntu-latest
@@ -181,6 +188,12 @@ jobs:
         lambda: ${{ fromJson(needs.detect-changes.outputs.all_lambdas) }}
       fail-fast: false
     steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+
       - name: Resolve AWS function name
         id: resolve
         run: |
@@ -196,9 +209,6 @@ jobs:
           echo "function_name=xomforms-$NAME" >> $GITHUB_OUTPUT
 
       - name: Update lambda layer configuration
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         run: |
           FUNCTION_NAME="${{ steps.resolve.outputs.function_name }}"
           echo "Updating layer and runtime for $FUNCTION_NAME"
@@ -209,6 +219,9 @@ jobs:
             --region $AWS_REGION || echo "Function $FUNCTION_NAME not found, skipping..."
 
   deploy-changed-lambdas:
+    permissions:
+      id-token: write # mint the OIDC token traded for the deploy role
+      contents: read
     needs: [detect-changes, test-lambdas, deploy-layer]
     if: always() && needs.detect-changes.outputs.has_lambda_changes == 'true' && (needs.test-lambdas.result == 'success' || needs.test-lambdas.result == 'skipped')
     runs-on: ubuntu-latest
@@ -217,6 +230,12 @@ jobs:
         lambda: ${{ fromJson(needs.detect-changes.outputs.changed_lambdas) }}
       fail-fast: false
     steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+
       - name: Checkout code
         uses: actions/checkout@v6
 
@@ -241,9 +260,6 @@ jobs:
           zip -r ../../${{ matrix.lambda }}.zip *
 
       - name: Deploy lambda code
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         run: |
           FUNCTION_NAME="${{ steps.resolve.outputs.function_name }}"
 
